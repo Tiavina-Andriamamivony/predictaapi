@@ -133,7 +133,14 @@ dependencies {
     implementation 'org.apache.tika:tika-core:2.9.1'
 
     implementation 'org.reflections:reflections:0.10.2'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa:3.2.2'
+    runtimeOnly    'org.postgresql:postgresql:42.7.2'
 
+    // Protobuf pour lire/écrire les fichiers MVT (.pbf)
+    implementation 'com.google.protobuf:protobuf-java:3.25.3'
+
+    // Librairie qui fournit les classes VectorTile générées depuis le .proto MVT
+    implementation 'com.wdtinc:mapbox-vector-tile:3.1.0'
     compileOnly 'org.projectlombok:lombok:1.18.30'
     annotationProcessor 'org.projectlombok:lombok:1.18.30'
     testCompileOnly 'org.projectlombok:lombok:1.18.30'
