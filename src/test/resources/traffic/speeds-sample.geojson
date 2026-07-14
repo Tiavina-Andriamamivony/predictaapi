@@ -1,0 +1,24 @@
+{
+  "type" : "FeatureCollection",
+  "features" : [ {
+    "type" : "Feature",
+    "properties" : {
+      "speed" : 32,
+      "rate" : 0.9
+    },
+    "geometry" : {
+      "type" : "LineString",
+      "coordinates" : [ [ 47.5502014, -18.9511131 ], [ 47.549032, -18.9520771 ] ]
+    }
+  }, {
+    "type" : "Feature",
+    "properties" : {
+      "speed" : 12,
+      "rate" : 0.4
+    },
+    "geometry" : {
+      "type" : "MultiLineString",
+      "coordinates" : [ [ [ 47.51, -18.91 ], [ 47.52, -18.92 ] ], [ [ 47.53, -18.93 ], [ 47.54, -18.94 ] ] ]
+    }
+  } ]
+}
