@@ -45,4 +45,5 @@ out/
 ### AI ###
 CLAUDE.md
 .claude/
-doc/superpower/
+docs/superpowers/plans/2026-06-09-traffic-live-merge.md
+docs/superpowers/specs/2026-06-09-traffic-live-merge-design.md
