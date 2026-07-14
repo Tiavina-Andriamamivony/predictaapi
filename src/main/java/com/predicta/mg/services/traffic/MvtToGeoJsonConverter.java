@@ -173,8 +173,8 @@ public class MvtToGeoJsonConverter {
   /**
    * Reprojette un pixel de tuile (origine coin haut-gauche) vers une coordonnée WGS84 [lon, lat].
    * Formule inverse de la projection Web Mercator (slippy map) : la latitude passe par un
-   * atan(sinh) car Mercator n'est pas linéaire en y. Arrondi à 7 décimales (~1 cm), suffisant pour
-   * la carte.
+   * atan(sinh) car Mercator n'est pas linéaire en y. Arrondi à 5 décimales (~1 m), suffisant pour
+   * la carte et bien plus léger que 7 (~1 cm) sur des centaines de milliers de points.
    */
   private double[] toWgs84(int pixelX, int pixelY, int extent, TileCoordinate tile) {
     int tileCount = 1 << tile.zoom();
@@ -184,10 +184,10 @@ public class MvtToGeoJsonConverter {
             Math.atan(
                 Math.sinh(
                     Math.PI * (1 - 2.0 * (tile.tileY() + (double) pixelY / extent) / tileCount))));
-    return new double[] {round7(lon), round7(lat)};
+    return new double[] {round5(lon), round5(lat)};
   }
 
-  private double round7(double degrees) {
-    return Math.round(degrees * 1e7) / 1e7;
+  private double round5(double degrees) {
+    return Math.round(degrees * 1e5) / 1e5;
   }
 }
