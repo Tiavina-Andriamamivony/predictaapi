@@ -40,4 +40,10 @@ out/
 **.toml
 
 ### Mac OS ###
-.DS_Store
+.DS_Storeresult.geojson
+
+### AI ###
+CLAUDE.md
+.claude/
+docs/superpowers/plans/2026-06-09-traffic-live-merge.md
+docs/superpowers/specs/2026-06-09-traffic-live-merge-design.md
