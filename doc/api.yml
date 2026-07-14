@@ -1,0 +1,246 @@
+openapi: 3.0.3
+info:
+  title: Predicta API
+  description: >
+    API trafic temps réel d'Antananarivo. Récupère des tuiles MVT (Mapbox
+    Vector Tile) depuis une source de circulation, les convertit en GeoJSON
+    (/traffic), et expose une recherche de quartiers pour recentrer la carte
+    (/quartiers). Aucune persistence du trafic.
+  version: 1.0.0
+  contact:
+    name: Équipe Predicta
+    email: yuta-mg@proton.me
+  license:
+    name: Propriétaire
+    url: https://predicta.com/license
+
+servers:
+  - url: https://api.predicta.com/v1
+    description: Production
+  - url: http://localhost:8080
+    description: Local
+
+paths:
+  /ping:
+    get:
+      summary: Healthcheck minimal
+      description: Retourne "pong" si l'application est vivante.
+      tags:
+        - Health
+      responses:
+        '200':
+          description: L'application répond
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: pong
+
+  /health/email:
+    get:
+      summary: Test d'envoi d'emails
+      description: >
+        Envoie 5 emails de test à l'adresse fournie (sujet seul, avec cc,
+        avec bcc, avec corps HTML, avec pièce jointe) pour vérifier la
+        pipeline d'emails.
+      tags:
+        - Health
+      parameters:
+        - name: to
+          in: query
+          required: true
+          description: Adresse email destinataire des tests
+          schema:
+            type: string
+            format: email
+            example: test@example.com
+      responses:
+        '200':
+          description: Tous les emails ont été envoyés avec succès
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: OK
+
+  /traffic:
+    get:
+      summary: État du trafic live
+      description: >
+        Récupère en parallèle les tuiles MVT de la source trafic couvrant
+        Antananarivo, ne conserve que le layer "speeds", les convertit en
+        GeoJSON et les fusionne en une seule FeatureCollection.
+
+        Best-effort : si une ou plusieurs tuiles échouent (timeout, erreur
+        réseau), elles sont ignorées et l'en-tête `X-Predicta-Partial: true`
+        est posé sur la réponse — le corps reste un GeoJSON valide mais
+        géographiquement incomplet. Aucune persistence.
+      tags:
+        - Trafic
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: >
+            FeatureCollection GeoJSON des segments trafic. Toujours 200 même en
+            cas de résultat partiel : voir l'en-tête X-Predicta-Partial.
+          headers:
+            X-Predicta-Partial:
+              description: >
+                Présent et égal à "true" uniquement si au moins une tuile a
+                échoué et a été ignorée (résultat incomplet). Absent sinon.
+              schema:
+                type: string
+                enum: [ 'true' ]
+          content:
+            application/geo+json:
+              schema:
+                $ref: '#/components/schemas/TrafficFeatureCollection'
+        '401':
+          description: Clé API absente ou invalide (en-tête X-API-Key).
+
+  /quartiers:
+    get:
+      summary: Recherche de quartiers
+      description: >
+        Recherche les quartiers de Tana dont le nom contient `q` (insensible à
+        la casse), triés par nom. `q` vide ou absent = tous les quartiers.
+        Renvoie nom + centroïde, pour recentrer la carte sur le quartier.
+      tags:
+        - Quartiers
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Sous-chaîne du nom recherchée. Vide = tous.
+          schema:
+            type: string
+            default: ''
+            example: ana
+      responses:
+        '200':
+          description: Liste des quartiers correspondants.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QuartierView'
+        '401':
+          description: Clé API absente ou invalide (en-tête X-API-Key).
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: >
+        Clé API d'une application enregistrée (table `applications`). Requise
+        sur /traffic et /quartiers. /ping et /health/email restent ouverts.
+
+  schemas:
+    QuartierView:
+      type: object
+      description: Quartier de Tana (nom + centroïde) pour recentrer la carte.
+      required: [ name, lon, lat ]
+      properties:
+        name:
+          type: string
+          example: Analakely
+        lon:
+          type: number
+          format: double
+          example: 47.5210
+        lat:
+          type: number
+          format: double
+          example: -18.9100
+    TrafficFeatureCollection:
+      type: object
+      description: FeatureCollection GeoJSON (RFC 7946) des segments trafic.
+      required: [ type, features ]
+      properties:
+        type:
+          type: string
+          enum: [ FeatureCollection ]
+        features:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrafficFeature'
+
+    TrafficFeature:
+      type: object
+      description: Un segment routier observé, issu du layer "speeds".
+      required: [ type, properties, geometry ]
+      properties:
+        type:
+          type: string
+          enum: [ Feature ]
+        properties:
+          $ref: '#/components/schemas/SpeedProperties'
+        geometry:
+          $ref: '#/components/schemas/LineGeometry'
+
+    SpeedProperties:
+      type: object
+      description: >
+        Propriétés du segment, décodées des tags MVT du layer "speeds" :
+        nom de la route, vitesse et ratio de congestion.
+      properties:
+        name:
+          type: string
+          description: >
+            Nom de la route (tag MVT "name"). Absent si la source ne le
+            fournit pas pour ce segment. Sert à la recherche par route côté
+            client.
+          example: Avenue de l'Indépendance
+        speed:
+          type: integer
+          description: Vitesse observée en km/h.
+          example: 32
+        rate:
+          type: number
+          format: double
+          description: >
+            Ratio vitesse observée / vitesse libre (signal de congestion).
+            Calculé par la source contre sa propre vitesse libre, donc non
+            dérivable de la baseline OSM.
+          example: 0.9
+
+    LineGeometry:
+      type: object
+      description: >
+        Géométrie ligne en WGS84. Une position est un couple [lon, lat].
+        Le layer "speeds" ne produit que des lignes : LineString (un segment)
+        ou MultiLineString (plusieurs).
+      required: [ type, coordinates ]
+      properties:
+        type:
+          type: string
+          enum: [ LineString, MultiLineString ]
+        coordinates:
+          description: >
+            LineString -> tableau de positions [[lon,lat], ...].
+            MultiLineString -> tableau de lignes [[[lon,lat], ...], ...].
+          oneOf:
+            - type: array
+              items:
+                type: array
+                items:
+                  type: number
+                  format: double
+                minItems: 2
+                maxItems: 2
+            - type: array
+              items:
+                type: array
+                items:
+                  type: array
+                  items:
+                    type: number
+                    format: double
+                  minItems: 2
+                  maxItems: 2
