@@ -133,18 +133,7 @@ dependencies {
     implementation 'org.apache.tika:tika-core:2.9.1'
 
     implementation 'org.reflections:reflections:0.10.2'
-    implementation 'org.springframework.boot:spring-boot-starter-data-jpa:3.2.2'
-    runtimeOnly    'org.postgresql:postgresql:42.7.2'
-    implementation 'org.flywaydb:flyway-core:9.22.3'
 
-    // Protobuf pour lire/écrire les fichiers MVT (.pbf)
-    implementation 'com.google.protobuf:protobuf-java:3.25.3'
-
-    // Librairie qui fournit les classes VectorTile générées depuis le .proto MVT
-    implementation 'com.wdtinc:mapbox-vector-tile:3.1.0'
-
-    // JTS : index spatial (STRtree), point-in-polygon, plus-proche-voisin pour l'enrichissement OSM
-    implementation 'org.locationtech.jts:jts-core:1.20.0'
     compileOnly 'org.projectlombok:lombok:1.18.30'
     annotationProcessor 'org.projectlombok:lombok:1.18.30'
     testCompileOnly 'org.projectlombok:lombok:1.18.30'
@@ -152,9 +141,6 @@ dependencies {
 
     implementation 'org.openapitools:jackson-databind-nullable:0.2.6'
     implementation 'io.swagger:swagger-annotations:1.6.12'
-
-    // Génération automatique de la spec OpenAPI 3.0 et Swagger UI
-    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.3.0'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test:3.2.2'
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter:2.0.2'
