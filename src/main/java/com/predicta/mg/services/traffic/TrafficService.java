@@ -5,6 +5,7 @@ import com.predicta.mg.models.QuartierView;
 import com.predicta.mg.models.TileCoordinate;
 import com.predicta.mg.models.TileFetcher;
 import com.predicta.mg.models.TileGridSource;
+import com.predicta.mg.models.TileGridSourceCentered;
 import com.predicta.mg.models.TrafficResult;
 import com.predicta.mg.services.traffic.geojson.GeoJsonFeatureCollection;
 import com.predicta.mg.services.traffic.osm.OsmEnricher;
@@ -41,9 +42,33 @@ public class TrafficService {
   /** Résultat interne du fetch parallèle : les collections récoltées + si au moins une a échoué. */
   private record FetchOutcome(List<GeoJsonFeatureCollection> collections, boolean partial) {}
 
-  /** Trafic live de toute la zone couverte par la grille. */
+  /** Trafic live de toute la zone couverte par la grille par défaut (toute Tana). */
   public TrafficResult liveGeoJson() {
-    List<TileCoordinate> tiles = tileGridSource.tiles();
+    return liveGeoJson(tileGridSource.tiles());
+  }
+
+  /**
+   * Trafic live d'une zone centrée sur un quartier : même pipeline que {@link #liveGeoJson()}, mais
+   * sur une grille disque recentrée sur le quartier et de rayon réduit ({@code zone-radius}). Bien
+   * plus léger que la couverture complète, pour un recentrage carte.
+   */
+  public TrafficResult liveGeoJsonAround(QuartierView quartier) {
+    // Grille recentrée sur le quartier : le rayon de couverture (radius) prend le zone-radius
+    // réduit.
+    TileGridSource zone =
+        new TileGridSourceCentered(
+            new ScrapeProps(
+                quartier.lon(),
+                quartier.lat(),
+                props.zoom(),
+                props.zoneRadius(),
+                props.zoneRadius(),
+                props.fetchParallelism()));
+    return liveGeoJson(zone.tiles());
+  }
+
+  /** Cœur commun : fetch parallèle des tuiles données, merge, enrichissement, log. */
+  private TrafficResult liveGeoJson(List<TileCoordinate> tiles) {
     FetchOutcome outcome = fetchAllTiles(tiles);
     GeoJsonFeatureCollection merged = merge(outcome.collections());
     log.info(
@@ -52,11 +77,6 @@ public class TrafficService {
         merged.features().size(),
         outcome.partial());
     return new TrafficResult(merged, outcome.partial());
-  }
-
-  // TODO(feature liveGeoJsonByQuartier) : ne fetcher/renvoyer que le trafic du quartier ciblé.
-  public TrafficResult liveGeoJsonByQuartier(QuartierView quartier) {
-    throw new UnsupportedOperationException("Not implemented yet");
   }
 
   /** Fetch + conversion de toutes les tuiles en parallèle ; possède le cycle de vie du pool. */

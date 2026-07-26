@@ -13,9 +13,15 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param centerLon longitude du centre de la zone (degrés WGS84)
  * @param centerLat latitude du centre de la zone (degrés WGS84)
  * @param zoom niveau de zoom slippy-map des tuiles
- * @param radius rayon de la grille en tuiles autour du centre (disque)
+ * @param radius rayon de la grille en tuiles autour du centre (disque, couverture complète)
+ * @param zoneRadius rayon réduit pour /traffic/zone, recentré sur un quartier
  * @param fetchParallelism nombre de tuiles fetchées en parallèle
  */
 @ConfigurationProperties("scrape")
 public record ScrapeProps(
-    double centerLon, double centerLat, int zoom, int radius, int fetchParallelism) {}
+    double centerLon,
+    double centerLat,
+    int zoom,
+    int radius,
+    int zoneRadius,
+    int fetchParallelism) {}

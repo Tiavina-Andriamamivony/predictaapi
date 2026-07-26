@@ -17,7 +17,7 @@ class TileGridSourceCenteredTest {
   private static final double TANA_LAT = -18.90457;
 
   private static TileGridSourceCentered grid(int radius) {
-    return new TileGridSourceCentered(new ScrapeProps(TANA_LON, TANA_LAT, 13, radius, 16));
+    return new TileGridSourceCentered(new ScrapeProps(TANA_LON, TANA_LAT, 13, radius, 2, 16));
   }
 
   @Test
@@ -75,7 +75,8 @@ class TileGridSourceCenteredTest {
   void zoom_hors_bornes_leve_exception() {
     assertThatThrownBy(
             () ->
-                new TileGridSourceCentered(new ScrapeProps(TANA_LON, TANA_LAT, 99, 1, 16)).tiles())
+                new TileGridSourceCentered(new ScrapeProps(TANA_LON, TANA_LAT, 99, 1, 2, 16))
+                    .tiles())
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("scrape.zoom");
   }
