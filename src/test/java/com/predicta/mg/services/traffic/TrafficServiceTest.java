@@ -1,11 +1,15 @@
 package com.predicta.mg.services.traffic;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.predicta.mg.conf.ScrapeProps;
+import com.predicta.mg.models.QuartierView;
 import com.predicta.mg.models.TileCoordinate;
 import com.predicta.mg.models.TileFetcher;
 import com.predicta.mg.models.TileGridSource;
@@ -24,7 +28,7 @@ class TrafficServiceTest {
   // Enrichissement OSM no-op : ce test cible l'orchestration fetch/merge, pas l'enrichissement.
   private final TrafficService service =
       new TrafficService(
-          grid, fetcher, converter, OsmEnricher.noop(), new ScrapeProps(0, 0, 13, 5, 16));
+          grid, fetcher, converter, OsmEnricher.noop(), new ScrapeProps(0, 0, 13, 5, 2, 16));
 
   private byte[] oneLine() {
     VectorTile.Tile.Feature f =
@@ -77,5 +81,19 @@ class TrafficServiceTest {
 
     assertThat(result.partial()).isTrue();
     assertThat(result.featureCollection().features()).hasSize(1);
+  }
+
+  @Test
+  void zone_recentre_la_grille_sur_le_quartier_sans_utiliser_la_grille_par_defaut() {
+    // liveGeoJsonAround construit sa propre grille disque (zone-radius=2 -> 13 tuiles) centrée sur
+    // le quartier, sans passer par le TileGridSource injecté.
+    when(fetcher.fetch(any())).thenReturn(oneLine());
+
+    TrafficResult result =
+        service.liveGeoJsonAround(new QuartierView("Analakely", 47.52315, -18.90457));
+
+    assertThat(result.partial()).isFalse();
+    assertThat(result.featureCollection().features()).hasSize(13); // disque r=2
+    verify(grid, never()).tiles();
   }
 }
