@@ -1,5 +1,6 @@
 package com.predicta.mg.services.traffic;
 
+import com.predicta.mg.models.QuartierView;
 import com.predicta.mg.models.TileCoordinate;
 import com.predicta.mg.models.TileFetcher;
 import com.predicta.mg.models.TileGridSource;
@@ -36,6 +37,7 @@ public class TrafficService {
   private final OsmEnricher osmEnricher;
   private final int parallelism;
 
+  // POURQUOI TU AUTOWIRED LE CONSTRUCTEUR ??
   @Autowired
   public TrafficService(
       TileGridSource tileGridSource,
@@ -50,10 +52,16 @@ public class TrafficService {
     this.parallelism = Math.max(1, parallelism);
   }
 
+  // POURQUOI NE PAS JUSTE UTILISER ALLARGCONSTRUCTOR ET NOARGCONSTRUCTOR
   /** Constructeur de test : parallélisme par défaut, enrichissement OSM no-op (identité). */
   TrafficService(
       TileGridSource tileGridSource, TileFetcher tileFetcher, MvtToGeoJsonConverter converter) {
     this(tileGridSource, tileFetcher, converter, OsmEnricher.noop(), 16);
+  }
+
+  public TrafficResult liveGeoJsonByQuartier(QuartierView quartier) {
+
+    throw new RuntimeException("Not implemented yet");
   }
 
   public TrafficResult liveGeoJson() {

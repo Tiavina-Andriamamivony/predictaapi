@@ -10,13 +10,10 @@ info:
   contact:
     name: Équipe Predicta
     email: yuta-mg@proton.me
-  license:
-    name: Propriétaire
-    url: https://predicta.com/license
 
 servers:
-  - url: https://api.predicta.com/v1
-    description: Production
+  - url: https://24isak6mtigvgdtrvlqojmkeai0xaxcz.lambda-url.eu-west-3.on.aws
+    description: Preproduction
   - url: http://localhost:8080
     description: Local
 
