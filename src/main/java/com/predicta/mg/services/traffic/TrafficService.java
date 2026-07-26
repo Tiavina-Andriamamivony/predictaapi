@@ -1,5 +1,6 @@
 package com.predicta.mg.services.traffic;
 
+import com.predicta.mg.conf.ScrapeProps;
 import com.predicta.mg.models.QuartierView;
 import com.predicta.mg.models.TileCoordinate;
 import com.predicta.mg.models.TileFetcher;
@@ -11,98 +12,99 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 /**
- * Orchestration live de /traffic : grille -> fetch -> convert (par tuile) -> merge GeoJSON.
- * Best-effort : une tuile en échec est ignorée (log warn) et marque le résultat partiel. Aucune
- * persistence.
+ * Orchestration live de /traffic : grille &rarr; fetch &rarr; convert (par tuile) &rarr; merge
+ * GeoJSON &rarr; enrichissement OSM. Aucune persistence.
  *
- * <p>Le fetch est parallélisé : la grille couvrant tout Tana fait plusieurs dizaines de tuiles, et
- * un fetch séquentiel (~0,65 s/tuile pleine) dépasserait le plafond 30 s de l'API Gateway derrière
- * la Lambda. Un pool de taille {@code fetch-parallelism} ramène la latence à quelques secondes.
+ * <p>Best-effort : une tuile en échec est ignorée (log warn) et marque le résultat partiel. Le
+ * fetch est parallélisé car la grille couvrant Tana fait plusieurs dizaines de tuiles ; en
+ * séquentiel (~0,65 s/tuile pleine) on dépasserait le plafond 30 s de l'API Gateway.
  */
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class TrafficService {
 
   private final TileGridSource tileGridSource;
   private final TileFetcher tileFetcher;
   private final MvtToGeoJsonConverter converter;
   private final OsmEnricher osmEnricher;
-  private final int parallelism;
+  private final ScrapeProps props;
 
-  // POURQUOI TU AUTOWIRED LE CONSTRUCTEUR ??
-  @Autowired
-  public TrafficService(
-      TileGridSource tileGridSource,
-      TileFetcher tileFetcher,
-      MvtToGeoJsonConverter converter,
-      OsmEnricher osmEnricher,
-      @Value("${scrape.fetch-parallelism:16}") int parallelism) {
-    this.tileGridSource = tileGridSource;
-    this.tileFetcher = tileFetcher;
-    this.converter = converter;
-    this.osmEnricher = osmEnricher;
-    this.parallelism = Math.max(1, parallelism);
-  }
+  /** Résultat interne du fetch parallèle : les collections récoltées + si au moins une a échoué. */
+  private record FetchOutcome(List<GeoJsonFeatureCollection> collections, boolean partial) {}
 
-  // POURQUOI NE PAS JUSTE UTILISER ALLARGCONSTRUCTOR ET NOARGCONSTRUCTOR
-  /** Constructeur de test : parallélisme par défaut, enrichissement OSM no-op (identité). */
-  TrafficService(
-      TileGridSource tileGridSource, TileFetcher tileFetcher, MvtToGeoJsonConverter converter) {
-    this(tileGridSource, tileFetcher, converter, OsmEnricher.noop(), 16);
-  }
-
-  public TrafficResult liveGeoJsonByQuartier(QuartierView quartier) {
-
-    throw new RuntimeException("Not implemented yet");
-  }
-
+  /** Trafic live de toute la zone couverte par la grille. */
   public TrafficResult liveGeoJson() {
     List<TileCoordinate> tiles = tileGridSource.tiles();
-    List<GeoJsonFeatureCollection> collections = new ArrayList<>();
-    var partial = false;
+    FetchOutcome outcome = fetchAllTiles(tiles);
+    GeoJsonFeatureCollection merged = merge(outcome.collections());
+    log.info(
+        "/traffic live : {} tuiles, {} features, partial={}",
+        tiles.size(),
+        merged.features().size(),
+        outcome.partial());
+    return new TrafficResult(merged, outcome.partial());
+  }
 
-    var threads = Math.clamp(tiles.size(), 1, parallelism);
-    var pool = Executors.newFixedThreadPool(threads);
+  // TODO(feature liveGeoJsonByQuartier) : ne fetcher/renvoyer que le trafic du quartier ciblé.
+  public TrafficResult liveGeoJsonByQuartier(QuartierView quartier) {
+    throw new UnsupportedOperationException("Not implemented yet");
+  }
+
+  /** Fetch + conversion de toutes les tuiles en parallèle ; possède le cycle de vie du pool. */
+  private FetchOutcome fetchAllTiles(List<TileCoordinate> tiles) {
+    int threads = Math.clamp(tiles.size(), 1, props.fetchParallelism());
+    ExecutorService pool = Executors.newFixedThreadPool(threads);
     try {
       List<Future<GeoJsonFeatureCollection>> futures = new ArrayList<>();
       for (TileCoordinate coord : tiles) {
         futures.add(pool.submit(fetchAndConvert(coord)));
       }
-      for (int i = 0; i < tiles.size(); i++) {
-        try {
-          collections.add(futures.get(i).get());
-        } catch (ExecutionException e) {
-          partial = true;
-          log.warn("Tuile ignorée (best-effort) {} : {}", tiles.get(i), e.getCause().getMessage());
-        } catch (InterruptedException e) {
-          Thread.currentThread().interrupt();
-          partial = true;
-          log.warn("Fetch interrompu pour {} : {}", tiles.get(i), e.getMessage());
-        }
-      }
+      return collect(futures, tiles);
     } finally {
       pool.shutdownNow();
     }
-
-    GeoJsonFeatureCollection merged = GeoJsonFeatureCollection.concat(collections);
-    merged = osmEnricher.enrich(merged); // best-effort : quartierId + name comblé, ou no-op
-    log.info(
-        "/traffic live : {} tuiles, {} features, partial={}",
-        tiles.size(),
-        merged.features().size(),
-        partial);
-    return new TrafficResult(merged, partial);
   }
 
+  /**
+   * Récolte les résultats du pool ; ignore les tuiles en échec (best-effort) et note le partiel.
+   */
+  private FetchOutcome collect(
+      List<Future<GeoJsonFeatureCollection>> futures, List<TileCoordinate> tiles) {
+    List<GeoJsonFeatureCollection> collections = new ArrayList<>();
+    boolean partial = false;
+    for (int i = 0; i < tiles.size(); i++) {
+      try {
+        collections.add(futures.get(i).get());
+      } catch (ExecutionException e) {
+        partial = true;
+        log.warn("Tuile ignorée (best-effort) {} : {}", tiles.get(i), e.getCause().getMessage());
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        partial = true;
+        log.warn("Fetch interrompu pour {} : {}", tiles.get(i), e.getMessage());
+      }
+    }
+    return new FetchOutcome(collections, partial);
+  }
+
+  /** Une tuile : fetch du .pbf puis conversion en GeoJSON, avec sa propre coordonnée de tuile. */
   private Callable<GeoJsonFeatureCollection> fetchAndConvert(TileCoordinate coord) {
     return () -> converter.convert(coord, tileFetcher.fetch(coord));
+  }
+
+  /**
+   * Concatène les collections puis pose quartierId + noms via OSM (best-effort, no-op possible).
+   */
+  private GeoJsonFeatureCollection merge(List<GeoJsonFeatureCollection> collections) {
+    return osmEnricher.enrich(GeoJsonFeatureCollection.concat(collections));
   }
 }

@@ -5,10 +5,12 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.predicta.mg.conf.ScrapeProps;
 import com.predicta.mg.models.TileCoordinate;
 import com.predicta.mg.models.TileFetcher;
 import com.predicta.mg.models.TileGridSource;
 import com.predicta.mg.models.TrafficResult;
+import com.predicta.mg.services.traffic.osm.OsmEnricher;
 import com.wdtinc.mapbox_vector_tile.VectorTile;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -19,7 +21,10 @@ class TrafficServiceTest {
   private final TileGridSource grid = mock(TileGridSource.class);
   private final TileFetcher fetcher = mock(TileFetcher.class);
 
-  private final TrafficService service = new TrafficService(grid, fetcher, converter);
+  // Enrichissement OSM no-op : ce test cible l'orchestration fetch/merge, pas l'enrichissement.
+  private final TrafficService service =
+      new TrafficService(
+          grid, fetcher, converter, OsmEnricher.noop(), new ScrapeProps(0, 0, 13, 5, 16));
 
   private byte[] oneLine() {
     VectorTile.Tile.Feature f =
