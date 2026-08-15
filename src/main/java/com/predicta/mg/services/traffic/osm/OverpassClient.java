@@ -4,7 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.Geometry;
@@ -77,13 +79,14 @@ public class OverpassClient {
    */
   OsmSnapshot load() {
     String bbox = bbox();
-    STRtree quartiers = buildQuartiers(post(quartiersQuery(bbox)));
+    Map<String, QuartierPolygon> quartierById = new HashMap<>();
+    STRtree quartiers = buildQuartiers(post(quartiersQuery(bbox)), quartierById);
     STRtree rues = buildRues(post(ruesQuery(bbox)));
     quartiers.build();
     rues.build();
     log.info(
         "Index OSM chargé : {} quartiers, {} rues (bbox {})", quartiers.size(), rues.size(), bbox);
-    return new OsmSnapshot(quartiers, rues, System.currentTimeMillis());
+    return new OsmSnapshot(quartiers, quartierById, rues, System.currentTimeMillis());
   }
 
   private JsonNode post(String query) {
@@ -114,7 +117,13 @@ public class OverpassClient {
     return "[out:json][timeout:60];way[\"highway\"][\"name\"](" + bbox + ");out geom;";
   }
 
+  /** Variante sans map : pour les tests de parse purs. */
   STRtree buildQuartiers(JsonNode root) {
+    return buildQuartiers(root, new HashMap<>());
+  }
+
+  /** Construit le R-tree des quartiers ET l'index par id (lookup O(1) par {@code rel_<osmId>}). */
+  STRtree buildQuartiers(JsonNode root, Map<String, QuartierPolygon> quartierById) {
     STRtree tree = new STRtree();
     for (JsonNode el : root.path("elements")) {
       if (!"relation".equals(el.path("type").asText())) {
@@ -126,7 +135,9 @@ public class OverpassClient {
           continue;
         }
         String id = "rel_" + el.path("id").asLong();
-        tree.insert(geom.getEnvelopeInternal(), new QuartierPolygon(id, geom));
+        QuartierPolygon quartier = new QuartierPolygon(id, geom);
+        quartierById.put(id, quartier);
+        tree.insert(geom.getEnvelopeInternal(), quartier);
       } catch (Exception e) {
         log.warn("Relation OSM {} ignorée : {}", el.path("id").asLong(), e.getMessage());
       }

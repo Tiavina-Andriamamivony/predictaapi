@@ -38,7 +38,9 @@ cd predictaapi
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/traffic` | API key | Live Antananarivo traffic as a GeoJSON `FeatureCollection` |
+| `GET` | `/traffic` | API key | Live Antananarivo traffic as a GeoJSON `FeatureCollection` (whole city, heavy) |
+| `GET` | `/traffic/quartier/{quartierId}` | API key | Live traffic of one quartier — OSM polygon (or Voronoi cell) grid (1-4 tiles) + geometric filter, 45 s in-memory cache, `404` if unknown |
+| `PUT` | `/traffic/zone` | API key | Traffic around a centroid as GeoJSON (lightweight disk grid, for map recentering) |
 | `GET` | `/quartiers?q=` | API key | Search Tana quartiers by name substring (returns name + centroid) |
 | `GET` | `/ping` | Open | Healthcheck — returns `"pong"` |
 | `GET` | `/health/email?to=` | Open | Send test emails to verify the SES pipeline |
@@ -65,6 +67,15 @@ Each `speeds` feature carries `name`, `quartierId`, `speed` (km/h) and `rate` (c
 The pipeline is **best-effort**: a tile that fails to fetch is skipped (warn log) and the response
 sets `X-Predicta-Partial: true`. The tile-URL template is **not committed** — supply it via the
 `SCRAPE_TILE_TEMPLATE` env var (placeholders `{x} {y} {zoom}`).
+
+`/traffic/zone` and `/traffic/quartier/{quartierId}` reuse the same pipeline on much smaller grids:
+a centroid disk (`scrape.zone-radius`, 2 tiles by default) or the quartier's geometry — the OSM
+polygon when available (`rel_*`), otherwise a Voronoi cell rebuilt from the stored centroids, so
+all 372 quartiers are covered (typically 1-4 tiles) — then a geometric filter keeps only the
+segments inside the quartier. Quartier responses are cached in memory (45 s, stale-while-revalidate,
+age exposed via `X-Predicta-Age`); if no geometry is available the endpoint degrades to the
+unfiltered centroid disk and signals it via `X-Predicta-Fallback`. `/traffic` stays for whole-city
+views.
 
 ## Build and run
 

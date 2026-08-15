@@ -52,6 +52,19 @@ public class OsmIndex {
   }
 
   /**
+   * Géométrie du quartier OSM demandé, ou {@code null} si l'index n'est pas prêt ou le quartier
+   * absent du snapshot. Ne lève jamais — l'appelant décide du comportement de repli.
+   */
+  public org.locationtech.jts.geom.Geometry quartierGeometryOrNull(String quartierId) {
+    OsmSnapshot snap = snapshotOrNull();
+    if (snap == null) {
+      return null;
+    }
+    QuartierPolygon quartier = snap.quartierById().get(quartierId);
+    return quartier == null ? null : quartier.geometry();
+  }
+
+  /**
    * Rend le snapshot présent (instantané si déjà chargé, ou fraîchement chargé sur le 1er appel si
    * ça tient dans {@code ready-timeout-ms}), sinon {@code null}. Ne lève jamais.
    */

@@ -36,6 +36,7 @@ class GzipResponseFilterTest {
 
     assertThat(res.getHeader("Content-Encoding")).isEqualTo("gzip");
     assertThat(res.getHeader("Vary")).isEqualTo("Accept-Encoding");
+    assertThat(res.getContentLength()).isEqualTo(res.getContentAsByteArray().length);
     assertThat(res.getContentAsByteArray().length).isLessThan(body.length());
     assertThat(gunzip(res.getContentAsByteArray())).isEqualTo(body);
   }
