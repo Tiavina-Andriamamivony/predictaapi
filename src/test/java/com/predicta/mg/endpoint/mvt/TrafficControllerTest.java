@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.predicta.mg.endpoint.mvt.mapper.TrafficResultMapper;
 import com.predicta.mg.models.TrafficResult;
 import com.predicta.mg.services.traffic.TrafficService;
 import com.predicta.mg.services.traffic.geojson.GeoJsonFeature;
@@ -22,6 +23,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 class TrafficControllerTest {
 
   private final TrafficService service = mock(TrafficService.class);
+  private final TrafficResultMapper mapper = new TrafficResultMapper();
   private MockMvc mockMvc;
 
   private GeoJsonFeatureCollection oneFeature() {
@@ -37,7 +39,7 @@ class TrafficControllerTest {
 
   @BeforeEach
   void setUp() {
-    mockMvc = MockMvcBuilders.standaloneSetup(new TrafficController(service)).build();
+    mockMvc = MockMvcBuilders.standaloneSetup(new TrafficController(service, mapper)).build();
   }
 
   @Test
@@ -65,5 +67,41 @@ class TrafficControllerTest {
         .perform(get("/traffic"))
         .andExpect(status().isOk())
         .andExpect(header().string("X-Predicta-Partial", "true"));
+  }
+
+  @Test
+  void traffic_quartier_renvoie_200_geojson() throws Exception {
+    when(service.liveGeoJsonForQuartier("rel_999"))
+        .thenReturn(new TrafficResult(oneFeature(), false));
+
+    mockMvc
+        .perform(get("/traffic/quartier/rel_999"))
+        .andExpect(status().isOk())
+        .andExpect(header().string("Content-Type", "application/geo+json"))
+        .andExpect(header().doesNotExist("X-Predicta-Partial"))
+        .andExpect(jsonPath("$.type").value("FeatureCollection"))
+        .andExpect(jsonPath("$.features.length()").value(1));
+  }
+
+  @Test
+  void traffic_quartier_en_fallback_pose_header_fallback() throws Exception {
+    when(service.liveGeoJsonForQuartier("rel_999"))
+        .thenReturn(new TrafficResult(oneFeature(), false, true));
+
+    mockMvc
+        .perform(get("/traffic/quartier/rel_999"))
+        .andExpect(status().isOk())
+        .andExpect(header().string("X-Predicta-Fallback", "true"));
+  }
+
+  @Test
+  void traffic_quartier_servi_du_cache_pose_age() throws Exception {
+    when(service.liveGeoJsonForQuartier("rel_999"))
+        .thenReturn(new TrafficResult(oneFeature(), false, false, 1234));
+
+    mockMvc
+        .perform(get("/traffic/quartier/rel_999"))
+        .andExpect(status().isOk())
+        .andExpect(header().string("X-Predicta-Age", "1234"));
   }
 }

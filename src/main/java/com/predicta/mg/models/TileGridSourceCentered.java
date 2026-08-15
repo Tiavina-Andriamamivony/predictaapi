@@ -21,9 +21,6 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class TileGridSourceCentered implements TileGridSource {
 
-  // Bornes du niveau de zoom slippy-map : 0 = monde entier, 22 = résolution max courante.
-  private static final int MAX_ZOOM = 22;
-
   private final ScrapeProps props;
 
   @Override
@@ -38,20 +35,18 @@ public class TileGridSourceCentered implements TileGridSource {
     if (props.radius() < 0) {
       throw new IllegalArgumentException("scrape.radius doit être >= 0, reçu " + props.radius());
     }
-    if (props.zoom() < 0 || props.zoom() > MAX_ZOOM) {
+    if (props.zoom() < 0 || props.zoom() > SlippyTiles.MAX_ZOOM) {
       throw new IllegalArgumentException(
-          "scrape.zoom doit être dans [0.." + MAX_ZOOM + "], reçu " + props.zoom());
+          "scrape.zoom doit être dans [0.." + SlippyTiles.MAX_ZOOM + "], reçu " + props.zoom());
     }
   }
 
-  /** Projette le centre (lon/lat WGS84) sur sa tuile XYZ via la projection Web Mercator directe. */
+  /** Projette le centre (lon/lat WGS84) sur sa tuile XYZ (voir {@link SlippyTiles}). */
   private TileCoordinate centerTile() {
-    int tilesPerAxis = 1 << props.zoom();
-    int tileX = (int) Math.floor((props.centerLon() + 180.0) / 360.0 * tilesPerAxis);
-    double latRad = Math.toRadians(props.centerLat());
-    double mercatorY = Math.log(Math.tan(latRad) + 1.0 / Math.cos(latRad));
-    int tileY = (int) Math.floor((1.0 - mercatorY / Math.PI) / 2.0 * tilesPerAxis);
-    return new TileCoordinate(props.zoom(), tileX, tileY);
+    return new TileCoordinate(
+        props.zoom(),
+        SlippyTiles.tileX(props.centerLon(), props.zoom()),
+        SlippyTiles.tileY(props.centerLat(), props.zoom()));
   }
 
   /** Balaye la bbox carrée autour du centre et ne retient que les tuiles tombant dans le disque. */
