@@ -9,6 +9,7 @@ import com.predicta.mg.services.traffic.geojson.GeoJsonFeatureCollection;
 import com.predicta.mg.services.traffic.geojson.GeoJsonGeometry;
 import com.predicta.mg.services.traffic.geojson.SpeedFeatureProperties;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.Geometry;
@@ -32,7 +33,8 @@ class OsmEnricherTest {
               new Coordinate(0, 1),
               new Coordinate(0, 0)
             });
-    quartiers.insert(square.getEnvelopeInternal(), new QuartierPolygon("rel_999", square));
+    QuartierPolygon quartier = new QuartierPolygon("rel_999", square);
+    quartiers.insert(square.getEnvelopeInternal(), quartier);
 
     STRtree rues = new STRtree();
     LineString road =
@@ -41,7 +43,8 @@ class OsmEnricherTest {
 
     quartiers.build();
     rues.build();
-    return new OsmSnapshot(quartiers, rues, System.currentTimeMillis());
+    return new OsmSnapshot(
+        quartiers, Map.of("rel_999", quartier), rues, System.currentTimeMillis());
   }
 
   private OsmEnricher enricherWith(OsmSnapshot snap) {

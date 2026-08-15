@@ -6,6 +6,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.time.Duration;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.locationtech.jts.index.strtree.STRtree;
 
@@ -16,7 +17,7 @@ class OsmIndexTest {
     STRtree r = new STRtree();
     q.build();
     r.build();
-    return new OsmSnapshot(q, r, System.currentTimeMillis());
+    return new OsmSnapshot(q, Map.of(), r, System.currentTimeMillis());
   }
 
   @Test

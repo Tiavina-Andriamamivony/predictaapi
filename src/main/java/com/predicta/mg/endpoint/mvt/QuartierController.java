@@ -1,7 +1,7 @@
 package com.predicta.mg.endpoint.mvt;
 
+import com.predicta.mg.models.QuartierView;
 import com.predicta.mg.services.QuartierService;
-import com.predicta.mg.services.QuartierService.QuartierView;
 import io.swagger.v3.oas.annotations.Operation;
 import java.util.List;
 import lombok.RequiredArgsConstructor;

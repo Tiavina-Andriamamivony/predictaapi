@@ -44,14 +44,16 @@ public class GzipResponseFilter implements Filter {
 
     BufferingResponse buffer = new BufferingResponse(response);
     chain.doFilter(req, buffer);
-    buffer.flushBuffer();
     byte[] body = buffer.body();
 
     if (body.length < MIN_BYTES) {
+      // Pas de flushBuffer() : il committerait la vraie réponse et ferait perdre les en-têtes posés
+      // après (Content-Encoding/Content-Length). On écrit directement, Tomcat pose Content-Length.
       response.getOutputStream().write(body);
       return;
     }
 
+    // En-têtes posés AVANT toute écriture/commit : c'est ce qui garantit qu'ils partent au client.
     response.setHeader("Content-Encoding", "gzip");
     response.addHeader("Vary", "Accept-Encoding");
     ByteArrayOutputStream compressed = new ByteArrayOutputStream();
@@ -90,6 +92,14 @@ public class GzipResponseFilter implements Filter {
     public ServletOutputStream getOutputStream() {
       return stream;
     }
+
+    /**
+     * No-op volontaire : Spring MVC flushe la réponse à la fin du rendu ; sans ce no-op, la vraie
+     * réponse serait commitée (en-têtes perdus) AVANT que le filtre pose Content-Encoding et
+     * Content-Length et écrive le corps compressé.
+     */
+    @Override
+    public void flushBuffer() {}
 
     byte[] body() {
       return buffer.toByteArray();

@@ -1,87 +1,81 @@
 package com.predicta.mg.models;
 
+import com.predicta.mg.conf.ScrapeProps;
 import java.util.ArrayList;
 import java.util.List;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
- * Construit la grille de tuiles couvrant la zone à partir d'un centre (lon/lat) + un rayon, en
- * disque : la ville est ronde autour du centre, on prend toutes les tuiles dont la distance au
- * centre (en tuiles) est <= radius. Plus le radius est grand, plus la couverture s'étend.
+ * Construit la grille de tuiles couvrant la zone, en <b>disque</b> : la ville est ronde autour d'un
+ * centre (lon/lat), on garde toutes les tuiles dont la distance au centre (mesurée en tuiles) est
+ * &le; {@code radius}. Plus le rayon est grand, plus la couverture s'étend. Le disque (plutôt qu'un
+ * carré) écarte les quatre coins — campagne vide — donc moins de fetch et une réponse plus légère.
  *
- * <p>Valeurs par défaut = config observée sur la source trafic : centre {@code
- * fromLonLat([47.52315,-18.90457])}, zoom mini 13, tuile centrale (5177,4534) au zoom 13. Les
- * tuiles vides (coins/campagne) sont de toute façon ignorées best-effort en aval.
+ * <p>Config par défaut alimentée par la source trafic : centre ({@code 47.52315, -18.90457}), zoom
+ * 13, tuile centrale (5177, 4534). Les tuiles vides restantes sont ignorées best-effort en aval.
  */
 @Component
 @Slf4j
+@RequiredArgsConstructor
 public class TileGridSourceCentered implements TileGridSource {
 
-  private final double centerLon;
-  private final double centerLat;
-  private final int zoom;
-  private final int radius;
-
-  public TileGridSourceCentered(
-      @Value("${scrape.center-lon:47.52315}") double centerLon,
-      @Value("${scrape.center-lat:-18.90457}") double centerLat,
-      @Value("${scrape.zoom:13}") int zoom,
-      @Value("${scrape.radius:5}") int radius) {
-    this.centerLon = centerLon;
-    this.centerLat = centerLat;
-    this.zoom = zoom;
-    this.radius = radius;
-  }
+  private final ScrapeProps props;
 
   @Override
   public List<TileCoordinate> tiles() {
-    if (radius < 0) {
-      throw new IllegalArgumentException("radius doit être >= 0 (scrape.radius)");
-    }
-
+    checkConfig();
     TileCoordinate center = centerTile();
-    int minX = center.tileX() - radius;
-    int maxX = center.tileX() + radius;
-    int minY = center.tileY() - radius;
-    int maxY = center.tileY() + radius;
+    return diskAround(center);
+  }
 
-    // Disque (et non carré) : on garde la tuile si sa distance au centre <= radius, en tuiles.
-    // La ville est ronde autour du centre ; ça écarte les 4 coins (zones de campagne vides) et
-    // réduit d'autant le nombre de fetch et la taille de la réponse.
-    List<TileCoordinate> grid = new ArrayList<>();
-    for (int x = minX; x <= maxX; x++) {
-      for (int y = minY; y <= maxY; y++) {
-        int dx = x - center.tileX();
-        int dy = y - center.tileY();
-        if (dx * dx + dy * dy <= radius * radius) {
-          grid.add(new TileCoordinate(zoom, x, y));
+  /** Rejette une config invalide au plus tôt, avec un message pointant la propriété fautive. */
+  private void checkConfig() {
+    if (props.radius() < 0) {
+      throw new IllegalArgumentException("scrape.radius doit être >= 0, reçu " + props.radius());
+    }
+    if (props.zoom() < 0 || props.zoom() > SlippyTiles.MAX_ZOOM) {
+      throw new IllegalArgumentException(
+          "scrape.zoom doit être dans [0.." + SlippyTiles.MAX_ZOOM + "], reçu " + props.zoom());
+    }
+  }
+
+  /** Projette le centre (lon/lat WGS84) sur sa tuile XYZ (voir {@link SlippyTiles}). */
+  private TileCoordinate centerTile() {
+    return new TileCoordinate(
+        props.zoom(),
+        SlippyTiles.tileX(props.centerLon(), props.zoom()),
+        SlippyTiles.tileY(props.centerLat(), props.zoom()));
+  }
+
+  /** Balaye la bbox carrée autour du centre et ne retient que les tuiles tombant dans le disque. */
+  private List<TileCoordinate> diskAround(TileCoordinate center) {
+    int radius = props.radius();
+    List<TileCoordinate> disk = new ArrayList<>();
+    for (int x = center.tileX() - radius; x <= center.tileX() + radius; x++) {
+      for (int y = center.tileY() - radius; y <= center.tileY() + radius; y++) {
+        if (isInsideDisk(x - center.tileX(), y - center.tileY(), radius)) {
+          disk.add(new TileCoordinate(props.zoom(), x, y));
         }
       }
     }
-    log.info(
-        "Grille disque z{} centre({},{}) x[{}..{}] y[{}..{}] radius={} -> {} tuiles",
-        zoom,
-        center.tileX(),
-        center.tileY(),
-        minX,
-        maxX,
-        minY,
-        maxY,
-        radius,
-        grid.size());
-    return grid;
+    logGrid(center, disk.size());
+    return disk;
   }
 
-  private TileCoordinate centerTile() {
-    int n = 1 << zoom;
-    int tileX = (int) Math.floor((centerLon + 180.0) / 360.0 * n);
-    double latRad = Math.toRadians(centerLat);
-    int tileY =
-        (int)
-            Math.floor(
-                (1.0 - Math.log(Math.tan(latRad) + 1.0 / Math.cos(latRad)) / Math.PI) / 2.0 * n);
-    return new TileCoordinate(zoom, tileX, tileY);
+  /** Distance² (en tuiles) au centre &le; rayon². Tout en entiers : pas de racine carrée. */
+  public static boolean isInsideDisk(int deltaX, int deltaY, int radius) {
+    return deltaX * deltaX + deltaY * deltaY <= radius * radius;
+  }
+
+  private void logGrid(TileCoordinate center, int tileCount) {
+    log.info(
+        "Grille disque z{} centre({},{}) radius={} -> {} tuiles",
+        props.zoom(),
+        center.tileX(),
+        center.tileY(),
+        props.radius(),
+        tileCount);
   }
 }
