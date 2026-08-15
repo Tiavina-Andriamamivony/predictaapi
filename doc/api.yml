@@ -3,20 +3,19 @@ info:
   title: Predicta API
   description: >
     API trafic temps réel d'Antananarivo. Récupère des tuiles MVT (Mapbox
-    Vector Tile) depuis une source de circulation, les convertit en GeoJSON
-    (/traffic), et expose une recherche de quartiers pour recentrer la carte
-    (/quartiers). Aucune persistence du trafic.
+    Vector Tile) depuis une source de circulation, les convertit en GeoJSON :
+    /traffic (ville entière), /traffic/zone (disque autour d'un centroïde) et
+    /traffic/quartier/{quartierId} (un quartier précis, grille polygonale).
+    Expose aussi la recherche de quartiers (/quartiers) pour recentrer la carte.
+    Aucune persistence du trafic.
   version: 1.0.0
   contact:
     name: Équipe Predicta
     email: yuta-mg@proton.me
-  license:
-    name: Propriétaire
-    url: https://predicta.com/license
 
 servers:
-  - url: https://api.predicta.com/v1
-    description: Production
+  - url: https://24isak6mtigvgdtrvlqojmkeai0xaxcz.lambda-url.eu-west-3.on.aws
+    description: Preproduction
   - url: http://localhost:8080
     description: Local
 
@@ -86,18 +85,97 @@ paths:
             cas de résultat partiel : voir l'en-tête X-Predicta-Partial.
           headers:
             X-Predicta-Partial:
-              description: >
-                Présent et égal à "true" uniquement si au moins une tuile a
-                échoué et a été ignorée (résultat incomplet). Absent sinon.
-              schema:
-                type: string
-                enum: [ 'true' ]
+              $ref: '#/components/headers/Partial'
           content:
             application/geo+json:
               schema:
                 $ref: '#/components/schemas/TrafficFeatureCollection'
         '401':
           description: Clé API absente ou invalide (en-tête X-API-Key).
+
+  /traffic/zone:
+    put:
+      summary: Trafic live autour d'un centroïde
+      description: >
+        Même pipeline que /traffic mais sur une grille disque de rayon réduit
+        (scrape.zone-radius, 2 tuiles par défaut) recentrée sur le centroïde
+        fourni : couvre le quartier et ses alentours, bien plus léger que la
+        ville entière (13 tuiles typiques). PUT car le corps porte le centroïde.
+        Best-effort identique à /traffic.
+      tags:
+        - Trafic
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuartierView'
+      responses:
+        '200':
+          description: >
+            FeatureCollection GeoJSON des segments autour du centroïde. Toujours
+            200 même en cas de résultat partiel : voir l'en-tête
+            X-Predicta-Partial.
+          headers:
+            X-Predicta-Partial:
+              $ref: '#/components/headers/Partial'
+          content:
+            application/geo+json:
+              schema:
+                $ref: '#/components/schemas/TrafficFeatureCollection'
+        '401':
+          description: Clé API absente ou invalide (en-tête X-API-Key).
+
+  /traffic/quartier/{quartierId}:
+    get:
+      summary: Trafic live d'un quartier précis
+      description: >
+        Grille polygonale calculée depuis la géométrie du quartier : polygone
+        OSM si disponible (rel_*), sinon cellule de Voronoi construite depuis
+        les centroïdes en base (couvre les n_*/w_*). Typiquement 1-4 tuiles au
+        lieu des 13 du disque centroïde, puis filtrage géométrique des segments
+        dans la géométrie. Réponse cachée en mémoire (TTL 45 s,
+        stale-while-revalidate, âge via X-Predicta-Age). Repli disque centroïde
+        non filtré (X-Predicta-Fallback) si aucune géométrie. Best-effort
+        identique.
+      tags:
+        - Trafic
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: quartierId
+          in: path
+          required: true
+          description: >
+            Identifiant du quartier, clé primaire de la table `quartiers`
+            (rel_<osmId> pour les polygones OSM, n_*/w_* pour les cellules
+            Voronoi) ; le nom exact est disponible via /quartiers?q=.
+          schema:
+            type: string
+            example: rel_999999
+      responses:
+        '200':
+          description: >
+            FeatureCollection GeoJSON des segments du quartier uniquement.
+            Toujours 200 même en cas de résultat partiel : voir les en-têtes
+            X-Predicta-Partial / X-Predicta-Fallback / X-Predicta-Age.
+          headers:
+            X-Predicta-Partial:
+              $ref: '#/components/headers/Partial'
+            X-Predicta-Fallback:
+              $ref: '#/components/headers/Fallback'
+            X-Predicta-Age:
+              $ref: '#/components/headers/Age'
+          content:
+            application/geo+json:
+              schema:
+                $ref: '#/components/schemas/TrafficFeatureCollection'
+        '401':
+          description: Clé API absente ou invalide (en-tête X-API-Key).
+        '404':
+          description: Quartier inconnu (absent de la table `quartiers`).
 
   /quartiers:
     get:
@@ -132,6 +210,31 @@ paths:
           description: Clé API absente ou invalide (en-tête X-API-Key).
 
 components:
+  headers:
+    Partial:
+      description: >
+        Présent et égal à "true" uniquement si au moins une tuile a échoué et a
+        été ignorée (résultat incomplet). Absent sinon.
+      schema:
+        type: string
+        enum: [ 'true' ]
+    Fallback:
+      description: >
+        Présent et égal à "true" si la réponse n'est pas limitée au quartier
+        demandé (disque centroïde non filtré servi faute de géométrie). Absent
+        sinon.
+      schema:
+        type: string
+        enum: [ 'true' ]
+    Age:
+      description: >
+        Âge de la donnée en millisecondes quand elle est servie depuis le cache
+        en mémoire (TTL court, stale-while-revalidate). Absent sur un
+        chargement live.
+      schema:
+        type: integer
+        format: int64
+
   securitySchemes:
     ApiKeyAuth:
       type: apiKey
@@ -139,7 +242,8 @@ components:
       name: X-API-Key
       description: >
         Clé API d'une application enregistrée (table `applications`). Requise
-        sur /traffic et /quartiers. /ping et /health/email restent ouverts.
+        sur les endpoints trafic et /quartiers. /ping et /health/email restent
+        ouverts.
 
   schemas:
     QuartierView:
@@ -187,8 +291,8 @@ components:
     SpeedProperties:
       type: object
       description: >
-        Propriétés du segment, décodées des tags MVT du layer "speeds" :
-        nom de la route, vitesse et ratio de congestion.
+        Propriétés du segment : nom de la route, quartier (enrichissement OSM),
+        vitesse et ratio de congestion.
       properties:
         name:
           type: string
@@ -197,6 +301,13 @@ components:
             fournit pas pour ce segment. Sert à la recherche par route côté
             client.
           example: Avenue de l'Indépendance
+        quartierId:
+          type: string
+          description: >
+            Identifiant du quartier contenant le 1er point du segment (format
+            rel_<osmId>), posé par l'enrichissement OSM. Absent si l'index OSM
+            n'est pas prêt (best-effort). Clé du path /traffic/quartier/{id}.
+          example: rel_999999
         speed:
           type: integer
           description: Vitesse observée en km/h.
