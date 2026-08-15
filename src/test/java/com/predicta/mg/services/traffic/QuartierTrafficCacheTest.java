@@ -49,7 +49,7 @@ class QuartierTrafficCacheTest {
   }
 
   @Test
-  void stale_servi_puis_refresh_en_fond() {
+  void stale_servi_puis_refresh_en_fond() throws InterruptedException {
     QuartierTrafficCache cache = new QuartierTrafficCache(0); // TTL nul -> toujours périmé
     AtomicInteger loads = new AtomicInteger();
 
@@ -60,6 +60,9 @@ class QuartierTrafficCacheTest {
               loads.incrementAndGet();
               return RESULT_OK;
             });
+    // TTL nul -> un hit dans la même milliseconde a un âge de 0 (frais, pas périmé) : on garantit
+    // que l'âge dépasse 0 avant de demander le hit périmé.
+    Thread.sleep(50);
     QuartierTrafficCache.Cached stale =
         cache.get(
             "rel_2",
@@ -67,7 +70,6 @@ class QuartierTrafficCacheTest {
               loads.incrementAndGet();
               return RESULT_PARTIAL;
             });
-
     // Sert l'ancien snapshot immédiatement, marqué stale, pendant que le refresh tourne en fond.
     assertThat(stale.staleServed()).isTrue();
     assertThat(stale.result().partial()).isFalse();
@@ -75,15 +77,21 @@ class QuartierTrafficCacheTest {
         .atMost(Duration.ofSeconds(2))
         .untilAsserted(() -> assertThat(loads).hasValue(2)); // refresh en fond exécuté
 
-    // Le snapshot rafraîchi est maintenant servi.
-    QuartierTrafficCache.Cached refreshed =
-        cache.get(
-            "rel_2",
+    // Le snapshot rafraîchi devient visible : on attend (pas de course put/lecture) que le prochain
+    // get serve RESULT_PARTIAL au lieu de l'ancien snapshot.
+    await()
+        .atMost(Duration.ofSeconds(2))
+        .untilAsserted(
             () -> {
-              loads.incrementAndGet();
-              return RESULT_OK;
+              QuartierTrafficCache.Cached refreshed =
+                  cache.get(
+                      "rel_2",
+                      () -> {
+                        loads.incrementAndGet();
+                        return RESULT_OK;
+                      });
+              assertThat(refreshed.result().partial()).isTrue();
             });
-    assertThat(refreshed.result().partial()).isTrue();
   }
 
   @Test
