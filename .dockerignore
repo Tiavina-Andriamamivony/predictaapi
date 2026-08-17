@@ -1,0 +1,33 @@
+# VCS
+.git
+.github
+
+# Builds locaux
+build
+.gradle
+.gradle/
+
+# IDE
+.idea
+.vscode
+*.iml
+.classpath
+.settings
+bin
+out
+
+# Outils locaux / agents
+.freebuff
+.claude
+.shell
+format.sh
+format.bat
+google-java-format-1.23.0-all-deps.jar
+
+# Docs (inutiles à l'image)
+docs
+doc
+*.md
+
+# Divers
+*.log
