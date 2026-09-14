@@ -15,14 +15,15 @@ import com.predicta.mg.services.traffic.geojson.GeoJsonFeatureCollection;
 import com.predicta.mg.services.traffic.geojson.GeoJsonGeometry;
 import com.predicta.mg.services.traffic.osm.OsmEnricher;
 import com.predicta.mg.services.traffic.osm.OsmIndex;
+import jakarta.annotation.PreDestroy;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import lombok.RequiredArgsConstructor;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import lombok.extern.slf4j.Slf4j;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.Geometry;
@@ -43,8 +44,15 @@ import org.springframework.web.server.ResponseStatusException;
  */
 @Service
 @Slf4j
-@RequiredArgsConstructor
 public class TrafficService {
+
+  /**
+   * Capacité de la file du pool de fetch. Les tâches en attente ne portent qu'une {@link
+   * TileCoordinate} (quelques octets) : ce qui coûte de la mémoire, ce sont les tuiles en cours de
+   * traitement, et elles sont bornées par le nombre de threads. La file ne sert donc qu'à éviter un
+   * rejet brutal quand beaucoup de requêtes arrivent en même temps.
+   */
+  private static final int FETCH_QUEUE_CAPACITY = 512;
 
   private final TileGridSource tileGridSource;
   private final TileFetcher tileFetcher;
@@ -56,6 +64,65 @@ public class TrafficService {
   private final QuartierGeometryIndex quartierGeometryIndex;
   private final QuartierTrafficCache quartierTrafficCache;
   private final GeometryFactory geometryFactory = new GeometryFactory();
+
+  /**
+   * Pool de fetch <b>partagé</b> et borné, créé une seule fois au démarrage : le cycle de vie du
+   * pool ne dépend pas de la requête. Avant, chaque appel construisait son propre pool de {@code
+   * fetchParallelism} threads puis le détruisait : N requêtes simultanées = N×16 threads et N×16
+   * tuiles en mémoire, ce qui transforme une charge normale en OOM. Ici le parallélisme global est
+   * plafonné par le pool, et la file bornée applique la pression en retour.
+   */
+  private final ThreadPoolExecutor fetchPool;
+
+  public TrafficService(
+      TileGridSource tileGridSource,
+      TileFetcher tileFetcher,
+      MvtToGeoJsonConverter converter,
+      OsmEnricher osmEnricher,
+      ScrapeProps props,
+      QuartierRepository quartierRepository,
+      OsmIndex osmIndex,
+      QuartierGeometryIndex quartierGeometryIndex,
+      QuartierTrafficCache quartierTrafficCache) {
+    // Validation des paramètres d'entrée (règle 7) : une config absurde doit échouer au démarrage
+    // avec un message qui nomme la propriété, pas lever un IllegalArgumentException générique du
+    // ThreadPoolExecutor au premier appel.
+    if (props.fetchParallelism() < 1) {
+      throw new IllegalArgumentException(
+          "scrape.fetch-parallelism doit être >= 1, reçu " + props.fetchParallelism());
+    }
+    this.tileGridSource = tileGridSource;
+    this.tileFetcher = tileFetcher;
+    this.converter = converter;
+    this.osmEnricher = osmEnricher;
+    this.props = props;
+    this.quartierRepository = quartierRepository;
+    this.osmIndex = osmIndex;
+    this.quartierGeometryIndex = quartierGeometryIndex;
+    this.quartierTrafficCache = quartierTrafficCache;
+    this.fetchPool =
+        new ThreadPoolExecutor(
+            props.fetchParallelism(),
+            props.fetchParallelism(),
+            0L,
+            TimeUnit.MILLISECONDS,
+            new ArrayBlockingQueue<>(FETCH_QUEUE_CAPACITY),
+            TrafficService::newFetchThread,
+            new ThreadPoolExecutor.CallerRunsPolicy());
+  }
+
+  /** Thread de fetch nommé et daemon (ne bloque pas l'arrêt de la JVM). */
+  private static Thread newFetchThread(Runnable task) {
+    Thread thread = new Thread(task, "traffic-tile-fetch");
+    thread.setDaemon(true);
+    return thread;
+  }
+
+  /** Arrêt propre du pool quand le contexte Spring se ferme. */
+  @PreDestroy
+  void shutdownFetchPool() {
+    fetchPool.shutdownNow();
+  }
 
   /** Résultat interne du fetch parallèle : les collections récoltées + si au moins une a échoué. */
   private record FetchOutcome(List<GeoJsonFeatureCollection> collections, boolean partial) {}
@@ -171,19 +238,13 @@ public class TrafficService {
     return new TrafficResult(merged, outcome.partial());
   }
 
-  /** Fetch + conversion de toutes les tuiles en parallèle ; possède le cycle de vie du pool. */
+  /** Fetch + conversion de toutes les tuiles en parallèle, sur le pool partagé de l'application. */
   private FetchOutcome fetchAllTiles(List<TileCoordinate> tiles) {
-    int threads = Math.clamp(tiles.size(), 1, props.fetchParallelism());
-    ExecutorService pool = Executors.newFixedThreadPool(threads);
-    try {
-      List<Future<GeoJsonFeatureCollection>> futures = new ArrayList<>();
-      for (TileCoordinate coord : tiles) {
-        futures.add(pool.submit(fetchAndConvert(coord)));
-      }
-      return collect(futures, tiles);
-    } finally {
-      pool.shutdownNow();
+    List<Future<GeoJsonFeatureCollection>> futures = new ArrayList<>(tiles.size());
+    for (TileCoordinate coord : tiles) {
+      futures.add(fetchPool.submit(fetchAndConvert(coord)));
     }
+    return collect(futures, tiles);
   }
 
   /**
