@@ -16,7 +16,8 @@ Spring Boot 3.2 / Java 21 service scaffolded from a **POJA** (Pieces Of Java App
 ./format.sh                     # google-java-format --replace over all src/**/*.java
 ```
 
-- Java 21 required. Jacoco runs as a `finalizedBy` on `test`; coverage minimum is set to 0, so the gate never fails the build — it only prints the line-coverage rate.
+- Java 21 required. Jacoco runs as a `finalizedBy` on `test` with a **ratchet**: the LINE minimum is 0.70 and must never be lowered (measured ~82%).
+- **Power of Ten (JPL/NASA) are enforced in CI** — see `docs/power-of-ten.md` for the rule-to-tool mapping. Source rules live in `config/checkstyle/checkstyle.xml` (`maxWarnings = 0`), bytecode rules (no per-request thread pools, no mutable static state, no JVM internals) in `src/test/java/com/predicta/mg/architecture/PowerOfTenRulesTest.java`, and `-Xlint:all,-processing -Werror` is on for main and test compilation. `@PojaGenerated` paths are excluded from Checkstyle. Run `./gradlew checkstyleMain checkstyleTest`.
 - `**/gen/**` is excluded from coverage (OpenAPI-generated code).
 - Tests use Testcontainers (`org.testcontainers`) — Docker must be running for integration tests.
 
@@ -38,6 +39,8 @@ JPA + Hibernate against a **dedicated** PostgreSQL (separate from any other Pred
 ## Live traffic pipeline (the active feature)
 
 `GET /traffic` (`endpoint/mvt/TrafficController`) is a **live, zero-persistence** passthrough. `TrafficService.liveGeoJson()` orchestrates: `TileGridSource` builds the tile grid covering Tana (centre + square radius, `scrape.*` props) → `TileFetcher` fetches each `.pbf` in parallel (pool size `scrape.fetch-parallelism`, gzip-decompressed if magic bytes `1F 8B`) → `MvtToGeoJsonConverter` hand-decodes the MVT geometry command stream (zigzag + delta; cmd `1`=MoveTo, `2`=LineTo, `7`=ClosePath), keeps only the `speeds` layer, reprojects tile pixels back to WGS84 → merged into one GeoJSON `FeatureCollection`. Best-effort: a failed tile is skipped (warn log) and sets `X-Predicta-Partial: true`.
+
+**Memory is the binding constraint** (512 MB container, `-XX:MaxRAMPercentage=75`): whole-city `/traffic` builds a ~75 MB GeoJSON object graph, and `GzipResponseFilter` compresses it in a streaming fashion precisely so the body is materialized only once. Any new code on a request path must stay bounded — bounded caches, a shared and bounded fetch pool, no full-body copies. ArchUnit (`PowerOfTenRulesTest`) fails the build on per-request pools and unbounded static state. `/traffic/tile/{z}/{x}/{y}.mvt` is the memory-cheap way to serve the map (raw passthrough, ETag, 30 s cache) and is deliberately public; every other traffic route requires `X-API-Key`.
 
 The MVT tile-URL template is **not** in the repo — it must be supplied via the `SCRAPE_TILE_TEMPLATE` env var (placeholders `{x} {y} {zoom}`). With it unset the app still boots, but `/traffic` returns nothing useful. MVT decoding is done manually against `com.wdtinc:mapbox-vector-tile`'s generated `VectorTile` protobuf classes, not a high-level library. The `RestTemplate` bean is wired in `conf/RestTemplateConf`.
 

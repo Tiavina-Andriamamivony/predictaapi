@@ -68,7 +68,10 @@ trafic) n'est **pas** marqué `@PojaGenerated`.
 - Déploiement : AWS Lambda + `aws-serverless-java-container`.
 - API doc : springdoc → Swagger UI sur `/swagger-ui.html`, spec `doc/api.yml`.
 - Tests : JUnit 5, Mockito, **Testcontainers** (Docker requis pour l'intégration), Jacoco
-  (gate à 0 % — n'échoue jamais, affiche juste le taux).
+  (**ratchet** : seuil à 70 %, on ne le baisse jamais ; le taux réel est ~82 %).
+- Qualité : **Power of Ten** (JPL/NASA) appliquées en CI — Checkstyle pour la source, **ArchUnit**
+  pour le bytecode, `-Xlint:all -Werror` pour la compilation. Tout est cartographié dans
+  [docs/power-of-ten.md](docs/power-of-ten.md).
 - Lombok partout (`@RequiredArgsConstructor`, `@Builder`, `@Slf4j`).
 
 ---
@@ -111,6 +114,10 @@ Vérifier que ça tourne : `curl localhost:8080/ping` → `pong`, puis `curl loc
    pipeline trafic se teste sans réseau (tuiles MVT construites en mémoire dans les tests existants).
 5. **Ne pas renommer** `settings.gradle` / l'artefact Lambda (`predicta-8f05e2da`) : identité de
    déploiement POJA.
+6. **Power of Ten** (vérifié en CI, pas une convention molle) : aucun pool de threads créé dans le
+   corps d'un service (règle 3 — c'est ce qui a provoqué les OOM), tout cache est borné, méthodes de
+   60 lignes maximum, aucun état statique mutable, aucune récursion. Mapping complet et écarts
+   assumés : [docs/power-of-ten.md](docs/power-of-ten.md).
 
 ---
 

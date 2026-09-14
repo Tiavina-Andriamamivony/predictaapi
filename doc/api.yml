@@ -177,6 +177,60 @@ paths:
         '404':
           description: Quartier inconnu (absent de la table `quartiers`).
 
+  /traffic/tile/{z}/{x}/{y}.mvt:
+    get:
+      summary: Tuile MVT du trafic live (passthrough de la source, CORS public)
+      description: >
+        Octets MVT bruts du layer "speeds" pour une tuile slippy (zoom/z, x, y),
+        servis au navigateur comme sur la source trafic. Aucune
+        conversion ni enrichissement ; la carte MapLibre fetch elle-même ses
+        tuiles. Volontairement public (CORS *, aucune clé API). Réponse cachée
+        quelques secondes (Cache-Control) avec ETag fort (SHA-256) pour que le
+        navigateur revalide via 304 aux refresh.
+      tags:
+        - Trafic
+      parameters:
+        - name: z
+          in: path
+          required: true
+          description: Zoom slippy, plage servie par la source 12..16.
+          schema:
+            type: integer
+            example: 13
+        - name: x
+          in: path
+          required: true
+          description: Colonne de tuile slippy.
+          schema:
+            type: integer
+            example: 5177
+        - name: y
+          in: path
+          required: true
+          description: Rangée de tuile slippy.
+          schema:
+            type: integer
+            example: 4535
+      responses:
+        '200':
+          description: Octets MVT du layer "speeds", en-têtes Cache-Control + ETag.
+          headers:
+            ETag:
+              description: ETag fort (SHA-256 du corps) pour revalidation 304.
+              schema:
+                type: string
+          content:
+            application/vnd.mapbox-vector-tile:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Tuile hors plage (zoom hors 12..16, x/y hors [0, 2^z)).
+        '502':
+          description: La tuile est indisponible côté source upstream (best-effort, pas de repli).
+        '304':
+          description: Not Modified si l'ETag fourni (If-None-Match) correspond toujours.
+
   /quartiers:
     get:
       summary: Recherche de quartiers
