@@ -1,6 +1,7 @@
 package com.predicta.mg.services.traffic;
 
 import com.predicta.mg.models.TrafficResult;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -21,6 +22,12 @@ import org.springframework.stereotype.Component;
  * précédent (borné à ~2×TTL) et on relance un refresh en fond ; l'utilisateur voit toujours un état
  * complet et daté, jamais un trou. Miss -> chargement synchrone avec single-flight (une seule
  * charge même si plusieurs requêtes arrivent ensemble). Les échecs ne sont pas cachés (404 inclus).
+ *
+ * <p><b>Le cache est borné</b> ({@code scrape.quartier-cache-max-entries}). Sans borne, chaque
+ * quartier visité gardait sa FeatureCollection à vie : sur 372 quartiers et un conteneur qui vit
+ * des heures, c'est une fuite mémoire lente à plusieurs centaines de Mo. Au-delà de la capacité, on
+ * évince le quartier chargé le plus ancien (LRU approximatif par horodatage) — un quartier évincé
+ * est simplement rechargé au prochain appel, la fraîcheur n'est jamais compromise.
  */
 @Component
 @Slf4j
@@ -32,6 +39,7 @@ public class QuartierTrafficCache {
   public record Cached(TrafficResult result, long ageMs, boolean staleServed) {}
 
   private final long ttlMs;
+  private final int maxEntries;
   private final ConcurrentHashMap<String, Entry> cache = new ConcurrentHashMap<>();
   private final ConcurrentHashMap<String, CompletableFuture<Entry>> inflight =
       new ConcurrentHashMap<>();
@@ -44,8 +52,20 @@ public class QuartierTrafficCache {
             return t;
           });
 
-  public QuartierTrafficCache(@Value("${scrape.quartier-cache-ttl-seconds:45}") long ttlSeconds) {
+  public QuartierTrafficCache(
+      @Value("${scrape.quartier-cache-ttl-seconds:45}") long ttlSeconds,
+      @Value("${scrape.quartier-cache-max-entries:32}") int maxEntries) {
+    if (maxEntries < 1) {
+      throw new IllegalArgumentException(
+          "scrape.quartier-cache-max-entries doit être >= 1, reçu " + maxEntries);
+    }
     this.ttlMs = ttlSeconds * 1000;
+    this.maxEntries = maxEntries;
+  }
+
+  /** Nombre d'entrées actuellement en cache (observabilité/tests). */
+  int size() {
+    return cache.size();
   }
 
   /**
@@ -74,7 +94,7 @@ public class QuartierTrafficCache {
     refresher.submit(
         () -> {
           try {
-            cache.put(quartierId, new Entry(loader.get(), System.currentTimeMillis()));
+            store(quartierId, new Entry(loader.get(), System.currentTimeMillis()));
           } catch (Throwable t) {
             log.warn(
                 "Refresh cache quartier {} échoué (stale servi ce coup-ci) : {}",
@@ -95,7 +115,7 @@ public class QuartierTrafficCache {
                     () -> new Entry(loader.get(), System.currentTimeMillis()), refresher));
     try {
       Entry entry = future.get();
-      cache.put(quartierId, entry);
+      store(quartierId, entry);
       return entry;
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
@@ -104,6 +124,38 @@ public class QuartierTrafficCache {
       throw new IllegalStateException("Chargement quartier échoué : " + quartierId, e.getCause());
     } finally {
       inflight.remove(quartierId, future);
+    }
+  }
+
+  /** Écrit une entrée puis ramène le cache sous sa capacité (éviction du plus ancien chargé). */
+  private void store(String quartierId, Entry entry) {
+    cache.put(quartierId, entry);
+    evictOverCapacity();
+  }
+
+  /**
+   * Évince les quartiers chargés les plus anciens pour ramener le cache à sa capacité. Parcours
+   * O(n) assumé : {@code maxEntries} est petit (quelques dizaines), pas besoin d'une structure
+   * ordonnée. Le nombre d'itérations est fixé une fois pour toutes (jamais « tant que ») : sous
+   * écritures concurrentes, une boucle conditionnelle pourrait ne jamais converger. Deux évictions
+   * simultanées peuvent retirer une entrée de trop — sans conséquence, une entrée absente étant
+   * simplement rechargée.
+   */
+  private void evictOverCapacity() {
+    int excess = cache.size() - maxEntries;
+    for (int evicted = 0; evicted < excess; evicted++) {
+      String oldestId = null;
+      long oldestAt = Long.MAX_VALUE;
+      for (Map.Entry<String, Entry> candidate : cache.entrySet()) {
+        if (candidate.getValue().loadedAtMs() < oldestAt) {
+          oldestAt = candidate.getValue().loadedAtMs();
+          oldestId = candidate.getKey();
+        }
+      }
+      if (oldestId == null || cache.remove(oldestId) == null) {
+        return; // rien à évincer (le cache s'est vidé entre-temps sous nos pieds)
+      }
+      log.debug("Cache quartier plein ({}) : {} évincé", maxEntries, oldestId);
     }
   }
 }
