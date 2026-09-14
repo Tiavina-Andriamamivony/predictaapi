@@ -36,6 +36,26 @@ jobs:
 
       
 
+  # Power of Ten (JPL/NASA) — voir docs/power-of-ten.md pour le mapping règle -> outil.
+  # `test` héberge les règles ArchUnit (règles 3/6/9, vérifiées sur le bytecode) et la compilation
+  # stricte -Xlint:all -Werror. Ce job-ci héberge l'analyse statique de la source.
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4.1.6
+      - uses: actions/setup-java@v4.2.1
+        with:
+          java-version: '21'
+          distribution: 'corretto'
+
+      - run: chmod +x gradlew
+      - run: chmod +x .shell/publish_gen_to_maven_local.sh
+
+      - name: Analyse statique (règles 1, 2, 4, 6, 7, 8, 9)
+        run: ./gradlew checkstyleMain checkstyleTest
+
   format:
     runs-on: ubuntu-latest
     timeout-minutes: 20

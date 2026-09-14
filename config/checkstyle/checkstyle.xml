@@ -1,0 +1,128 @@
+<?xml version="1.0"?>
+<!DOCTYPE module PUBLIC
+    "-//Checkstyle//DTD Checkstyle Configuration 1.3//EN"
+    "https://checkstyle.org/dtds/configuration_1_3.dtd">
+
+<!--
+  Règles de codage « Power of Ten » (JPL/NASA) appliquées au Java de Predicta.
+
+  Mapping règle NASA -> contrôle Checkstyle (détail et justification : docs/power-of-ten.md) :
+
+    1. Flux de contrôle simple        -> CyclomaticComplexity, NestedIfDepth, NestedForDepth,
+                                         FallThrough, MissingSwitchDefault, IllegalToken(LABELED_STAT)
+    2. Boucles à borne fixe           -> RegexpSinglelineJava (while(true), for(;;))
+    3. Pas d'allocation après init    -> ArchitectureRulesTest (les pools et les caches non bornés
+                                         se vérifient sur le graphe d'appels, pas sur le texte)
+    4. Fonctions courtes              -> MethodLength (60), ParameterNumber
+    5. Densité d'assertions           -> non exprimable ici (voir PIT dans la CI)
+    6. Portée minimale des variables  -> HiddenField, VisibilityModifier
+    7. Vérifier retours et paramètres -> IllegalCatch/IllegalThrows/EmptyCatchBlock, épaulés par
+                                         -Xlint:all -Werror côté compilateur
+    8. Préprocesseur limité           -> sans objet en Java : on interdit les imports statiques
+                                         génériques et les imports inutilisés/redondants
+    9. Pointeurs restreints           -> IllegalImport (reflection, Unsafe, internes JDK)
+   10. Compilation stricte            -> ce fichier + -Xlint:all -Werror (build.gradle)
+
+  Volontairement ABSENT : tout ce qui touche au formatage (indentation, espaces, longueur de ligne).
+  google-java-format en est déjà le seul maître (format.sh + le job `format` de la CI) ; dupliquer
+  ces règles créerait deux autorités qui se contrediraient.
+
+  Note : les messages personnalisés (`<property name="message">`) ne sont plus supportés par les
+  checks depuis Checkstyle 8.x. Le rapport nomme le check, et le mapping ci-dessus dit à quelle
+  règle NASA il correspond.
+
+  Les seuils (60 lignes, complexité 10, 7 paramètres) sont ceux de la règle d'origine : ce n'est pas
+  un « ratchet » à faire baisser, c'est la contrainte appliquée telle quelle.
+-->
+<module name="Checker">
+  <property name="severity" value="error"/>
+  <property name="fileExtensions" value="java"/>
+  <property name="charset" value="UTF-8"/>
+
+  <module name="TreeWalker">
+
+    <!-- ==== Règles 2 : boucles à borne fixe, ce que l'AST ne voit pas ==== -->
+    <module name="RegexpSinglelineJava">
+      <property name="format" value="while\s*\(\s*true\s*\)"/>
+      <property name="ignoreComments" value="true"/>
+    </module>
+    <module name="RegexpSinglelineJava">
+      <property name="format" value="for\s*\(\s*;\s*;\s*\)"/>
+      <property name="ignoreComments" value="true"/>
+    </module>
+    <module name="RegexpSinglelineJava">
+      <property name="format" value="System\s*\.\s*(exit|gc)\s*\("/>
+      <property name="ignoreComments" value="true"/>
+    </module>
+
+    <!-- ==== Règle 1 : flux de contrôle très simple ==== -->
+    <module name="CyclomaticComplexity"/>
+    <module name="NestedIfDepth">
+      <property name="max" value="3"/>
+    </module>
+    <module name="NestedForDepth">
+      <property name="max" value="2"/>
+    </module>
+    <module name="FallThrough"/>
+    <module name="MissingSwitchDefault"/>
+    <module name="SimplifyBooleanExpression"/>
+    <module name="SimplifyBooleanReturn"/>
+    <module name="IllegalToken">
+      <property name="tokens" value="LABELED_STAT"/>
+    </module>
+
+    <!-- ==== Règle 4 : fonctions courtes (une page imprimée) ==== -->
+    <module name="MethodLength">
+      <property name="max" value="60"/>
+      <property name="countEmpty" value="false"/>
+      <property name="tokens" value="METHOD_DEF, CTOR_DEF, COMPACT_CTOR_DEF"/>
+    </module>
+    <!-- Restreint aux méthodes : un constructeur d'injection (9 collaborateurs pour TrafficService)
+         n'est pas une fonction à rallonge, c'est un défaut de découpage, signalé dans
+         docs/power-of-ten.md plutôt que masqué par un seuil arbitraire. -->
+    <module name="ParameterNumber">
+      <property name="max" value="7"/>
+      <property name="ignoreOverriddenMethods" value="true"/>
+      <property name="tokens" value="METHOD_DEF"/>
+    </module>
+
+    <!-- ==== Règle 6 : portée minimale, état explicite ==== -->
+    <!-- ignoreConstructorParameter : affecter un paramètre à son champ homonyme (this.x = x) est la
+         convention d'injection du repo (Lombok @RequiredArgsConstructor). La règle 6 vise la portée
+         des variables, pas cette écriture ; le contrôle reste actif sur les méthodes et setters. -->
+    <module name="HiddenField">
+      <property name="ignoreConstructorParameter" value="true"/>
+    </module>
+    <module name="VisibilityModifier">
+      <property name="protectedAllowed" value="true"/>
+    </module>
+    <module name="FinalClass"/>
+
+    <!-- ==== Règle 7 : contrats explicites ==== -->
+    <module name="IllegalCatch">
+      <property name="illegalClassNames" value="java.lang.Error"/>
+    </module>
+    <module name="IllegalThrows">
+      <property name="illegalClassNames" value="java.lang.Error, java.lang.Throwable"/>
+    </module>
+    <module name="EmptyCatchBlock">
+      <property name="exceptionVariableName" value="expected|ignored"/>
+    </module>
+
+    <!-- ==== Règles 8 et 9 : pas de préprocesseur, pas de pointeurs « cachés » ==== -->
+    <module name="IllegalImport">
+      <property name="illegalPkgs" value="sun, sun.misc, jdk.internal, java.lang.reflect"/>
+    </module>
+    <module name="AvoidStarImport"/>
+    <module name="RedundantImport"/>
+    <module name="UnusedImports"/>
+
+    <!-- ==== Hygiène, au service des règles 1 et 7 ==== -->
+    <module name="OneTopLevelClass"/>
+    <module name="OneStatementPerLine"/>
+    <module name="EmptyStatement"/>
+    <module name="EqualsHashCode"/>
+    <module name="StringLiteralEquality"/>
+    <module name="InnerAssignment"/>
+  </module>
+</module>

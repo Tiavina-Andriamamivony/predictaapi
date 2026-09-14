@@ -9,8 +9,52 @@ plugins {
     id 'org.openapi.generator' version '7.7.0'
 
     id 'jacoco'
+    id 'checkstyle'
 
     
+}
+
+// ============================================================================================
+// Power of Ten (JPL/NASA) — voir docs/power-of-ten.md pour le mapping règle -> outil.
+// ============================================================================================
+
+// Le scaffold POJA (@PojaGenerated) est régénéré à chaque déploiement : le corriger ne sert à rien
+// et ferait échouer la CI sur du code qui revient tout seul. On l'exclut des analyseurs.
+def pojaGeneratedExcludes = [
+        '**/concurrency/**',
+        '**/datastructure/**',
+        '**/endpoint/EndpointConf.java',
+        '**/endpoint/RequestLoggerConfigurer.java',
+        '**/endpoint/rest/controller/health/**',
+        '**/file/**',
+        '**/handler/**',
+        '**/mail/**',
+        '**/PojaApplication.java',
+]
+
+checkstyle {
+    // Version épinglée : la config ne doit pas changer de comportement toute seule au fil des
+    // montées de Gradle.
+    toolVersion = '10.12.4'
+    configFile = file('config/checkstyle/checkstyle.xml')
+    // Zéro tolérance : c'est la règle 10 (« compiler sans aucun warning »).
+    maxWarnings = 0
+}
+
+tasks.withType(Checkstyle).configureEach {
+    exclude pojaGeneratedExcludes
+    reports {
+        xml.required = true
+        html.required = true
+    }
+}
+
+// Règle 10 : tous les avertissements activés, et une erreur est une erreur.
+// `-processing` est retiré : avec des annotations runtime (Spring, JPA, Jackson, Lombok), javac
+// signale « no processor claimed these annotations » — un faux positif, pas un défaut de code.
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.compilerArgs += ['-Xlint:all,-processing', '-Werror']
 }
 
 jacoco {
@@ -47,6 +91,10 @@ test {
 
 jacocoTestCoverageVerification {
     dependsOn test
+    // Le seuil porte sur la suite COMPLÈTE. Un run ciblé (./gradlew test --tests FooTest, très
+    // courant pour déboguer et documenté dans le README) ne peut par construction pas l'atteindre :
+    // on saute la vérification, le taux reste affiché par le rapport.
+    onlyIf { tasks.test.filter.commandLineIncludePatterns.isEmpty() }
     afterEvaluate {
         classDirectories.setFrom(files(classDirectories.files.collect {
             fileTree(dir: it, exclude: [
@@ -58,7 +106,13 @@ jacocoTestCoverageVerification {
         rule {
             limit {
                 counter = "LINE"
-                minimum = 0
+                // Power of Ten, règle 5 (les hypothèses doivent être vérifiées) : un seuil à 0 ne
+                // vérifie rien — le rapport s'affichait, mais aucune régression de couverture ne
+                // pouvait faire échouer la CI.
+                //
+                // Ratchet : on pose le seuil SOUS le taux mesuré (~82 % sur la suite unitaire) et
+                // on ne le baisse JAMAIS. Le relever au fur et à mesure que la couverture monte.
+                minimum = 0.70
             }
         }
     }
@@ -143,6 +197,9 @@ dependencies {
     implementation 'io.swagger:swagger-annotations:1.6.12'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test:3.2.2'
+    // Power of Ten (règles 1/3/9) : ce que Checkstyle ne peut pas voir — qui crée des pools de
+    // threads, qui détient de l'état statique mutable, qui touche aux internes de la JVM.
+    testImplementation 'com.tngtech.archunit:archunit-junit5:1.3.0'
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter:2.0.2'
     testImplementation 'org.junit-pioneer:junit-pioneer:2.2.0'
 
