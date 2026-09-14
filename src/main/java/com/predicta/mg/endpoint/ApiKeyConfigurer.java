@@ -15,17 +15,32 @@ public class ApiKeyConfigurer implements WebMvcConfigurer {
 
   static final String API_KEY_HEADER = "X-API-Key";
 
+  /**
+   * Chemins exigeant {@code X-API-Key}. Patterns <b>PathPattern</b>, donc un chemin multi-segment
+   * doit finir par {@code /**} : {@code "/traffic"} ne couvre QUE {@code /traffic} — s'il était
+   * laissé seul, {@code /traffic/zone} et {@code /traffic/quartier/*} resteraient ouverts (et
+   * exposeraient le pipeline lourd, celui qui sature la mémoire, à un appelant anonyme).
+   *
+   * <p>Exception volontaire : {@code /traffic/tile/**} reste public. C'est la source vectorielle
+   * que le navigateur fetch lui-même (comme sur la source trafic) ; la clé de la source amont ne
+   * quitte jamais le backend, il n'y a donc rien à protéger côté client.
+   */
+  static final String[] PROTECTED_PATHS = {
+    "/traffic", "/traffic/zone", "/traffic/quartier/**", "/quartiers"
+  };
+
   private final ApplicationRepository applicationRepository;
 
   @Override
   public void addInterceptors(InterceptorRegistry registry) {
     registry
         .addInterceptor(new ApiKeyInterceptor(applicationRepository))
-        .addPathPatterns("/traffic", "/quartiers");
+        .addPathPatterns(PROTECTED_PATHS);
   }
 
+  /** Package-private (et non privée) pour rester testable sans monter un contexte Spring. */
   @RequiredArgsConstructor
-  private static class ApiKeyInterceptor implements HandlerInterceptor {
+  static class ApiKeyInterceptor implements HandlerInterceptor {
 
     private final ApplicationRepository applicationRepository;
 
