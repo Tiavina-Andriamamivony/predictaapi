@@ -18,10 +18,10 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Tuiles MVT du trafic — passthrough de la source, servies au navigateur comme sur
- * la source trafic : la carte MapLibre fetch elle-même ses tuiles (source « vector »), sans proxy
- * ni aller-retour GeoJSON. Le navigateur ne charge que les tuiles visibles, au bon zoom, et
- * revalide via ETag (304) aux refresh périodiques.
+ * Tuiles MVT du trafic — passthrough de la source, servies au navigateur comme sur la source trafic
+ * : la carte MapLibre fetch elle-même ses tuiles (source « vector »), sans proxy ni aller-retour
+ * GeoJSON. Le navigateur ne charge que les tuiles visibles, au bon zoom, et revalide via ETag (304)
+ * aux refresh périodiques.
  *
  * <p>Endpoint volontairement public (CORS {@code *}, aucune clé) : comme le serveur de tuiles de
  * référence, ces tuiles sont destinées au navigateur. Le fetch upstream reste côté serveur — la clé
