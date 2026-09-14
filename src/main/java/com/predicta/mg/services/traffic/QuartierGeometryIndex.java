@@ -64,56 +64,9 @@ public class QuartierGeometryIndex {
         cells = Map.of();
         return cells;
       }
-      Coordinate[] coords = new Coordinate[quartiers.size()];
-      double minX = Double.MAX_VALUE;
-      double minY = Double.MAX_VALUE;
-      double maxX = -Double.MAX_VALUE;
-      double maxY = -Double.MAX_VALUE;
-      for (int i = 0; i < quartiers.size(); i++) {
-        Quartier q = quartiers.get(i);
-        double lon = q.getCentroidLon();
-        double lat = q.getCentroidLat();
-        coords[i] = new Coordinate(lon, lat);
-        minX = Math.min(minX, lon);
-        maxX = Math.max(maxX, lon);
-        minY = Math.min(minY, lat);
-        maxY = Math.max(maxY, lat);
-      }
-      // setSites(Geometry) : l'overload Collection de JTS attend en réalité des Coordinate.
-      VoronoiDiagramBuilder builder = new VoronoiDiagramBuilder();
-      builder.setSites(geometryFactory.createMultiPointFromCoords(coords));
-      builder.setClipEnvelope(
-          new Envelope(
-              minX - CLIP_MARGIN_DEG,
-              maxX + CLIP_MARGIN_DEG,
-              minY - CLIP_MARGIN_DEG,
-              maxY + CLIP_MARGIN_DEG));
-      // JTS ne garantit PAS l'ordre des cellules : on attribue chaque cellule au centroïde le plus
-      // proche de son point intérieur — le point intérieur d'une cellule de Voronoi est strictement
-      // plus proche de son propre site, la correspondance est donc déterministe et non ambiguë.
-      Geometry diagram = builder.getDiagram(geometryFactory);
-      if (diagram.getNumGeometries() != quartiers.size()) {
-        log.warn(
-            "Voronoi : {} cellules pour {} quartiers (centroïdes dupliqués ?) — les derniers"
-                + " retomberont sur le repli disque",
-            diagram.getNumGeometries(),
-            quartiers.size());
-      }
-      Map<String, Geometry> index = new HashMap<>();
-      for (int i = 0; i < diagram.getNumGeometries(); i++) {
-        Geometry cell = diagram.getGeometryN(i);
-        Point interior = cell.getInteriorPoint();
-        String bestId = null;
-        double bestDist = Double.MAX_VALUE;
-        for (int j = 0; j < quartiers.size(); j++) {
-          double d = distance2(interior.getCoordinate(), coords[j]);
-          if (d < bestDist) {
-            bestDist = d;
-            bestId = quartiers.get(j).getQuartierId();
-          }
-        }
-        index.put(bestId, cell);
-      }
+      Coordinate[] sites = centroids(quartiers);
+      Geometry diagram = voronoiDiagram(sites);
+      Map<String, Geometry> index = assignCells(quartiers, sites, diagram);
       cells = index;
       log.info("Index géométrique quartiers construit : {} cellules de Voronoi", index.size());
       return cells;
@@ -121,6 +74,73 @@ public class QuartierGeometryIndex {
       log.warn("Construction index géométrique échouée (best-effort) : {}", e.getMessage());
       return null;
     }
+  }
+
+  /** Centroïdes des quartiers, dans l'ordre de la liste (l'index des sites référence cet ordre). */
+  private static Coordinate[] centroids(List<Quartier> quartiers) {
+    Coordinate[] sites = new Coordinate[quartiers.size()];
+    for (int i = 0; i < quartiers.size(); i++) {
+      Quartier q = quartiers.get(i);
+      sites[i] = new Coordinate(q.getCentroidLon(), q.getCentroidLat());
+    }
+    return sites;
+  }
+
+  /** Diagramme de Voronoi des centroïdes, clippé sur la zone couverte (avec marge). */
+  private Geometry voronoiDiagram(Coordinate[] sites) {
+    Envelope clip = envelopeWithMargin(sites);
+    // setSites(Geometry) : l'overload Collection de JTS attend en réalité des Coordinate.
+    VoronoiDiagramBuilder builder = new VoronoiDiagramBuilder();
+    builder.setSites(geometryFactory.createMultiPointFromCoords(sites));
+    builder.setClipEnvelope(clip);
+    return builder.getDiagram(geometryFactory);
+  }
+
+  /** Bbox de tous les sites, élargie de la marge de clip (les cellules de bord couvrent large). */
+  private static Envelope envelopeWithMargin(Coordinate[] sites) {
+    Envelope envelope = new Envelope(sites[0]);
+    for (Coordinate site : sites) {
+      envelope.expandToInclude(site);
+    }
+    envelope.expandBy(CLIP_MARGIN_DEG);
+    return envelope;
+  }
+
+  /**
+   * JTS ne garantit PAS l'ordre des cellules : on attribue chaque cellule au centroïde le plus
+   * proche de son point intérieur — le point intérieur d'une cellule de Voronoi est strictement
+   * plus proche de son propre site, la correspondance est donc déterministe et non ambiguë.
+   */
+  private static Map<String, Geometry> assignCells(
+      List<Quartier> quartiers, Coordinate[] sites, Geometry diagram) {
+    if (diagram.getNumGeometries() != quartiers.size()) {
+      log.warn(
+          "Voronoi : {} cellules pour {} quartiers (centroïdes dupliqués ?) — les derniers"
+              + " retomberont sur le repli disque",
+          diagram.getNumGeometries(),
+          quartiers.size());
+    }
+    Map<String, Geometry> index = new HashMap<>();
+    for (int i = 0; i < diagram.getNumGeometries(); i++) {
+      Geometry cell = diagram.getGeometryN(i);
+      index.put(nearestQuartierId(cell.getInteriorPoint(), quartiers, sites), cell);
+    }
+    return index;
+  }
+
+  /** Quartier dont le centroïde est le plus proche du point donné. */
+  private static String nearestQuartierId(
+      Point point, List<Quartier> quartiers, Coordinate[] sites) {
+    String bestId = null;
+    double bestDist = Double.MAX_VALUE;
+    for (int j = 0; j < sites.length; j++) {
+      double d = distance2(point.getCoordinate(), sites[j]);
+      if (d < bestDist) {
+        bestDist = d;
+        bestId = quartiers.get(j).getQuartierId();
+      }
+    }
+    return bestId;
   }
 
   /** Distance² (degrés, pas de racine carrée) entre deux coordonnées. */

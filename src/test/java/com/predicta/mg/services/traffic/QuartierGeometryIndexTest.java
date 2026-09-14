@@ -41,13 +41,13 @@ class QuartierGeometryIndexTest {
 
     // La cellule de Voronoi de chaque quartier contient son propre centroïde (l'ordre des
     // cellules suit l'ordre des sites) et aucun autre id n'est laissé de côté.
-    assertThat(index.cellGeometryOrNull("n_1")).isNotNull();
-    assertThat(index.cellGeometryOrNull("n_2")).isNotNull();
-    assertThat(index.cellGeometryOrNull("n_3")).isNotNull();
+    assertThat(cell(index, "n_1")).isNotNull();
+    assertThat(cell(index, "n_2")).isNotNull();
+    assertThat(cell(index, "n_3")).isNotNull();
     assertThat(coversCentroid(index, "n_1", 47.50, -18.90)).isTrue();
     assertThat(coversCentroid(index, "n_2", 47.60, -18.90)).isTrue();
     assertThat(coversCentroid(index, "n_3", 47.55, -18.85)).isTrue();
-    assertThat(index.cellGeometryOrNull("absent")).isNull();
+    assertThat(cell(index, "absent")).isNull();
   }
 
   @Test
@@ -57,7 +57,16 @@ class QuartierGeometryIndexTest {
 
     QuartierGeometryIndex index = new QuartierGeometryIndex(repo);
 
-    assertThat(index.cellGeometryOrNull("n_1")).isNull();
+    assertThat(cell(index, "n_1")).isNull();
+  }
+
+  /**
+   * Cellule du quartier, vue comme {@code Object} : JTS {@code Geometry} n'est pas {@code
+   * Comparable}, l'overload AssertJ « comparable » déclenche un avertissement d'appel non vérifié —
+   * et la compilation stricte (-Werror) en fait une erreur.
+   */
+  private static Object cell(QuartierGeometryIndex index, String id) {
+    return index.cellGeometryOrNull(id);
   }
 
   private boolean coversCentroid(QuartierGeometryIndex index, String id, double lon, double lat) {
