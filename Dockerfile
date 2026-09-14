@@ -15,6 +15,11 @@ RUN gradle dependencies --no-daemon
 # 2) Sources, puis compilation + jar Spring Boot. On cible bootJar (pas build) : les tests
 #    d'intégration reposent sur Testcontainers, qui a besoin d'un Docker, indisponible pendant
 #    un build d'image.
+#    `config/` est copié pour que bootJar reste constructible même si des tâches d'analyse
+#    statique (Checkstyle, cf. Power of Ten) entrent un jour dans le graphe de `bootJar` ou si
+#    quelqu'un passe la cible à `build` : sans ce répertoire, la config de Checkstyle référencée
+#    par build.gradle serait introuvable dans l'image.
+COPY --chown=gradle:gradle config config
 COPY --chown=gradle:gradle src src
 RUN gradle bootJar --no-daemon
 

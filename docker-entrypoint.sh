@@ -17,7 +17,11 @@ esac
 PORT="${PORT:-8080}"
 
 # -XX:MaxRAMPercentage=75 : heap JVM adaptée à la limite mémoire du conteneur (les plans les plus
-#   petits font 512 Mo ; le filtre gzip de /traffic bufferise la réponse brute en mémoire).
+#   petits font 512 Mo). Le filtre gzip de /traffic compresse désormais EN STREAMING (plus de copie
+#   intégrale du corps), et le pool de fetch ainsi que le cache quartier sont bornés : le pic
+#   mémoire de /traffic a chuté d'environ 350 Mo à quelques dizaines de Mo. Si un OOM réapparaît,
+#   c'est que du non-heap (metaspace, buffers directs) prend la place : baisser alors à 65 plutôt
+#   que d'élargir le heap au-delà.
 # -XX:+ExitOnOutOfMemoryError : OOM => sortie du process => Render redémarre proprement.
 # JAVA_OPTS : réglages supplémentaires passés depuis le dashboard Render si besoin.
 exec java ${JAVA_OPTS:-} \
