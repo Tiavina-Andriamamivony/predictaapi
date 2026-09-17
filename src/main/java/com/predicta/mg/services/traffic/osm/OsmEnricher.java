@@ -53,13 +53,20 @@ public class OsmEnricher {
     try {
       OsmSnapshot snap = index.snapshotOrNull();
       if (snap == null) {
+        log.warn("Index OSM indisponible : enrichissement ignoré (best-effort)");
         return input;
       }
       List<GeoJsonFeature> out = new ArrayList<>(input.features().size());
       for (GeoJsonFeature f : input.features()) {
         out.add(enrichOne(f, snap));
       }
-      return new GeoJsonFeatureCollection(out);
+      GeoJsonFeatureCollection result = new GeoJsonFeatureCollection(out);
+      log.info(
+          "Enrichissement OSM : {} features, {} avec quartierId, {} avec nom",
+          result.features().size(),
+          countWithQuartier(result),
+          countWithName(result));
+      return result;
     } catch (Throwable t) {
       log.warn("Enrichissement OSM ignoré (best-effort) : {}", t.getMessage());
       return input;
@@ -83,6 +90,28 @@ public class OsmEnricher {
     return new GeoJsonFeature(
         new SpeedFeatureProperties(name, quartierId, props.speed(), props.rate()),
         feature.geometry());
+  }
+
+  /** Nombre de features portant un {@code quartierId} (observabilité). */
+  private static int countWithQuartier(GeoJsonFeatureCollection collection) {
+    int count = 0;
+    for (GeoJsonFeature f : collection.features()) {
+      if (f.properties().quartierId() != null) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  /** Nombre de features avec un nom non vide (observabilité). */
+  private static int countWithName(GeoJsonFeatureCollection collection) {
+    int count = 0;
+    for (GeoJsonFeature f : collection.features()) {
+      if (f.properties().name() != null) {
+        count++;
+      }
+    }
+    return count;
   }
 
   /** Premier point [lon, lat] de la géométrie, ou null si vide. */

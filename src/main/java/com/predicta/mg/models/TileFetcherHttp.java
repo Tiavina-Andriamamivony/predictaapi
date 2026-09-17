@@ -35,6 +35,7 @@ public class TileFetcherHttp implements TileFetcher {
             .replace("{x}", String.valueOf(coord.tileX()))
             .replace("{y}", String.valueOf(coord.tileY()));
     log.info("Fetching MVT -> {}", url);
+    long startedAt = System.currentTimeMillis();
 
     var headers = new HttpHeaders();
     headers.set("Accept", "application/x-protobuf");
@@ -47,11 +48,18 @@ public class TileFetcherHttp implements TileFetcher {
     if (data == null || data.length == 0) {
       throw new IllegalStateException("Réponse MVT vide pour : " + url);
     }
+    byte[] out;
     try {
-      return decompress(data);
+      out = decompress(data);
     } catch (IOException e) {
       throw new IllegalStateException("Décompression MVT échouée pour : " + url, e);
     }
+    log.info(
+        "MVT fetch OK {} -> {} octets en {} ms",
+        url,
+        out.length,
+        System.currentTimeMillis() - startedAt);
+    return out;
   }
 
   private byte[] decompress(byte[] data) throws IOException {
