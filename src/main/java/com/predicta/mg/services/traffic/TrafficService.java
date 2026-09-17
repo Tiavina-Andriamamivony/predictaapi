@@ -109,6 +109,16 @@ public class TrafficService {
             new ArrayBlockingQueue<>(FETCH_QUEUE_CAPACITY),
             TrafficService::newFetchThread,
             new ThreadPoolExecutor.CallerRunsPolicy());
+    log.info(
+        "Service trafic prêt : centre=({},{}), zoom={}, rayon={}, zone-radius={}, pool fetch = {}"
+            + " threads (file {}), décompression + conversion par tuile actifs",
+        props.centerLon(),
+        props.centerLat(),
+        props.zoom(),
+        props.radius(),
+        props.zoneRadius(),
+        props.fetchParallelism(),
+        FETCH_QUEUE_CAPACITY);
   }
 
   /** Thread de fetch nommé et daemon (ne bloque pas l'arrêt de la JVM). */
@@ -228,13 +238,15 @@ public class TrafficService {
 
   /** Cœur commun : fetch parallèle des tuiles données, merge, enrichissement, log. */
   private TrafficResult liveGeoJson(List<TileCoordinate> tiles) {
+    long startedAt = System.currentTimeMillis();
     FetchOutcome outcome = fetchAllTiles(tiles);
     GeoJsonFeatureCollection merged = merge(outcome.collections());
     log.info(
-        "/traffic live : {} tuiles, {} features, partial={}",
+        "/traffic live : {} tuiles, {} features, partial={} en {} ms",
         tiles.size(),
         merged.features().size(),
-        outcome.partial());
+        outcome.partial(),
+        System.currentTimeMillis() - startedAt);
     return new TrafficResult(merged, outcome.partial());
   }
 

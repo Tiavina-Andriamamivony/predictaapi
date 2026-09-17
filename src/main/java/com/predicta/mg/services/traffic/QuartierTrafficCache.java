@@ -79,11 +79,19 @@ public class QuartierTrafficCache {
       long age = now - entry.loadedAtMs();
       if (age > ttlMs) {
         refresh(quartierId, loader);
+        log.info(
+            "Cache quartier {} : stale servi (âgé de {} ms), refresh en fond", quartierId, age);
         return new Cached(entry.result(), age, true);
       }
+      log.debug("Cache quartier {} : hit frais (âgé de {} ms)", quartierId, age);
       return new Cached(entry.result(), age, false);
     }
+    log.info("Cache quartier {} : miss -> chargement", quartierId);
     Entry fresh = loadSync(quartierId, loader);
+    log.info(
+        "Cache quartier {} : chargé ({} features)",
+        quartierId,
+        fresh.result().featureCollection().features().size());
     return new Cached(fresh.result(), 0, false);
   }
 

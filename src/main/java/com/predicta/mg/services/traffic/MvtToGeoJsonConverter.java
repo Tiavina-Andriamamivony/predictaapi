@@ -61,7 +61,9 @@ public class MvtToGeoJsonConverter {
           }
         }
       }
-      return new GeoJsonFeatureCollection(features);
+      GeoJsonFeatureCollection result = new GeoJsonFeatureCollection(features);
+      log.info("Conversion MVT {} : {} features", tile, features.size());
+      return result;
     } catch (Exception e) {
       throw new IllegalStateException("Conversion MVT -> GeoJSON échouée pour tuile " + tile, e);
     }
